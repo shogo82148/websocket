@@ -16,6 +16,13 @@ func main() {
 	_ = resp
 	defer conn.CloseNow()
 
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Printf("Received: %s", data)
+
 	if err := conn.Write(ctx, websocket.MessageText, []byte("Hello WebSocket!")); err != nil {
 		log.Println(err)
 		return

@@ -91,7 +91,7 @@ func CloseStatus(err error) StatusCode {
 }
 
 func newConn(cfg connConfig) *Conn {
-	return &Conn{
+	conn := &Conn{
 		rwc:          cfg.rwc,
 		client:       cfg.client,
 		br:           cfg.br,
@@ -99,23 +99,12 @@ func newConn(cfg connConfig) *Conn {
 		writeFrameMu: newMutex(),
 		writerMu:     newMutex(),
 	}
+	return conn
 }
 
 // Ping sends a ping to the peer and waits for a pong.
 func (c *Conn) Ping(ctx context.Context) error {
 	return errors.New("not implemented")
-}
-
-// Reader reads from the connection until there is a WebSocket data message to be read.
-// It will handle ping, pong and close frames as appropriate.
-func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
-	return 0, nil, errors.New("not implemented")
-}
-
-// Read reads a single WebSocket message from the connection.
-// It will handle ping, pong and close frames as appropriate.
-func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
-	return 0, nil, errors.New("not implemented")
 }
 
 // SetReadLimit sets the max number of bytes to read for a single message.
@@ -142,11 +131,6 @@ func (c *Conn) Close(code StatusCode, reason string) error {
 
 func (c *Conn) CloseNow() error {
 	return errors.New("not implemented")
-}
-
-func (c *Conn) CloseRead(ctx context.Context) context.Context {
-	// TODO: implement CloseRead
-	return ctx
 }
 
 // mutex is a mutex that can be locked and unlocked with a context.Context.

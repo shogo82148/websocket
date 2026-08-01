@@ -3,6 +3,8 @@ package websocket
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
+	"io"
 )
 
 type opCode byte
@@ -33,6 +35,61 @@ func maskFramePayload(payload []byte, maskKey uint32) {
 	for i := range payload {
 		payload[i] ^= key[i%4]
 	}
+}
+
+func readFrameHeader(br *bufio.Reader) (frameHeader, error) {
+	var h frameHeader
+
+	// Read the first byte of the frame header.
+	b, err := br.ReadByte()
+	if err != nil {
+		return h, err
+	}
+	h.fin = b&0x80 != 0
+	h.rsv1 = b&0x40 != 0
+	h.rsv2 = b&0x20 != 0
+	h.rsv3 = b&0x10 != 0
+	h.opCode = opCode(b & 0x0F)
+
+	// Read the second byte of the frame header (payload length and mask).
+	b, err = br.ReadByte()
+	if err != nil {
+		return h, err
+	}
+	h.mask = b&0x80 != 0
+	payloadLen := int64(b & 0x7F)
+
+	// Read the extended payload length if necessary.
+	switch payloadLen {
+	case 126:
+		var buf [2]byte
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
+			return h, err
+		}
+		h.payloadLen = int64(binary.BigEndian.Uint16(buf[:]))
+	case 127:
+		var buf [8]byte
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
+			return h, err
+		}
+		h.payloadLen = int64(binary.BigEndian.Uint64(buf[:]))
+		if h.payloadLen < 0 {
+			return h, errors.New("websocket: invalid payload length")
+		}
+	default:
+		h.payloadLen = payloadLen
+	}
+
+	// Read the mask key if necessary.
+	if h.mask {
+		var buf [4]byte
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
+			return h, err
+		}
+		h.maskKey = binary.BigEndian.Uint32(buf[:])
+	}
+
+	return h, nil
 }
 
 func writeFrameHeader(bw *bufio.Writer, h frameHeader) error {
