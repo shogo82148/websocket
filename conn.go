@@ -174,6 +174,8 @@ func (m *mutex) unlock() {
 	<-m.ch
 }
 
+// noCopy may be embedded into structs which must not be copied after the first use.
+// ref. https://shogo82148.github.io/blog/2018/05/16/macopy-is-struct/
 type noCopy struct{}
 
 func (*noCopy) Lock()   {}
