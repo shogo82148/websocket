@@ -16,6 +16,7 @@ func TestAccept(t *testing.T) {
 			conn, err := Accept(w, r, nil)
 			if err != nil {
 				t.Errorf("Accept failed: %v", err)
+				return
 			}
 			conn.CloseNow()
 		}))
