@@ -171,9 +171,7 @@ func (m *mutex) lock(ctx context.Context) error {
 }
 
 func (m *mutex) unlock() {
-	select {
-	case <-m.ch:
-	}
+	<-m.ch
 }
 
 type noCopy struct{}
