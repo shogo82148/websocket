@@ -12,9 +12,13 @@ type messageWriter struct {
 	ctx    context.Context
 	conn   *Conn
 	opCode opCode
+	closed bool
 }
 
 func (w *messageWriter) Write(p []byte) (int, error) {
+	if w.closed {
+		return 0, io.ErrClosedPipe
+	}
 	err := w.conn.writeFrame(w.ctx, false, w.opCode, p)
 	if err != nil {
 		return 0, err
@@ -24,6 +28,10 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 }
 
 func (w *messageWriter) Close() error {
+	if w.closed {
+		return io.ErrClosedPipe
+	}
+	w.closed = true
 	err := w.conn.writeFrame(w.ctx, true, w.opCode, nil)
 	w.conn.writerMu.unlock()
 	return err
