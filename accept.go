@@ -157,7 +157,14 @@ func headerTokens(h http.Header, key string) iter.Seq[string] {
 }
 
 func getWebSocketKey(r *http.Request) (string, error) {
-	key := r.Header.Get("Sec-WebSocket-Key")
+	keys := r.Header.Values("Sec-WebSocket-Key")
+	if len(keys) == 0 {
+		return "", errors.New("websocket: missing Sec-WebSocket-Key header")
+	}
+	if len(keys) > 1 {
+		return "", errors.New("websocket: multiple Sec-WebSocket-Key headers")
+	}
+	key := strings.TrimSpace(keys[0])
 	data, err := base64.StdEncoding.DecodeString(key)
 	if err != nil {
 		return "", fmt.Errorf("websocket: invalid Sec-WebSocket-Key: %v", err)
