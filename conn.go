@@ -80,10 +80,11 @@ func CloseStatus(err error) StatusCode {
 
 func newConn(cfg connConfig) *Conn {
 	return &Conn{
-		rwc:    cfg.rwc,
-		client: cfg.client,
-		br:     cfg.br,
-		bw:     cfg.bw,
+		rwc:          cfg.rwc,
+		client:       cfg.client,
+		br:           cfg.br,
+		bw:           cfg.bw,
+		writeFrameMu: newMutex(),
 	}
 }
 
@@ -139,6 +140,12 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 type mutex struct {
 	_  noCopy
 	ch chan struct{}
+}
+
+func newMutex() *mutex {
+	return &mutex{
+		ch: make(chan struct{}, 1),
+	}
 }
 
 func (m *mutex) lock(ctx context.Context) error {
