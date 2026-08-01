@@ -155,6 +155,7 @@ func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *Dial
 	if err != nil {
 		return nil, fmt.Errorf("websocket: failed to create request: %w", err)
 	}
+	maps.Copy(req.Header, opts.HTTPHeader)
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Sec-WebSocket-Version", "13")
@@ -162,7 +163,6 @@ func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *Dial
 	if opts.Host != "" {
 		req.Host = opts.Host
 	}
-	maps.Copy(req.Header, opts.HTTPHeader)
 	if len(opts.Subprotocols) > 0 {
 		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(opts.Subprotocols, ", "))
 	}
