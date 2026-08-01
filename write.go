@@ -4,9 +4,30 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"io"
 )
+
+type messageWriter struct {
+	ctx    context.Context
+	conn   *Conn
+	opCode opCode
+}
+
+func (w *messageWriter) Write(p []byte) (int, error) {
+	err := w.conn.writeFrame(w.ctx, false, w.opCode, p)
+	if err != nil {
+		return 0, err
+	}
+	w.opCode = opContinuation
+	return len(p), nil
+}
+
+func (w *messageWriter) Close() error {
+	err := w.conn.writeFrame(w.ctx, true, opContinuation, nil)
+	w.conn.writerMu.unlock()
+	return err
+}
 
 // Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
 //
@@ -14,7 +35,24 @@ import (
 //
 // Only one writer can be open at a time, multiple calls will block until the previous writer is closed.
 func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteCloser, error) {
-	return nil, errors.New("not implemented")
+	var opCode opCode
+	switch messageType {
+	case MessageText:
+		opCode = opText
+	case MessageBinary:
+		opCode = opBinary
+	default:
+		return nil, fmt.Errorf("websocket: invalid message type: %s", messageType)
+	}
+
+	if err := c.writerMu.lock(ctx); err != nil {
+		return nil, err
+	}
+	return &messageWriter{
+		ctx:    ctx,
+		conn:   c,
+		opCode: opCode,
+	}, nil
 }
 
 // Write writes a message to the connection.
@@ -26,19 +64,25 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 	case MessageBinary:
 		opCode = opBinary
 	default:
-		return errors.New("websocket: invalid message type")
+		return fmt.Errorf("websocket: invalid message type: %s", messageType)
 	}
-	return c.writeFrame(ctx, opCode, data)
+
+	if err := c.writerMu.lock(ctx); err != nil {
+		return err
+	}
+	defer c.writerMu.unlock()
+
+	return c.writeFrame(ctx, true, opCode, data)
 }
 
-func (c *Conn) writeFrame(ctx context.Context, opCode opCode, data []byte) error {
+func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []byte) error {
 	if err := c.writeFrameMu.lock(ctx); err != nil {
 		return err
 	}
 	defer c.writeFrameMu.unlock()
 
 	h := frameHeader{
-		fin:        true,
+		fin:        fin,
 		opCode:     opCode,
 		mask:       c.client,
 		payloadLen: int64(len(data)),

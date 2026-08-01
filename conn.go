@@ -19,12 +19,24 @@ const (
 	MessageBinary MessageType = 2
 )
 
+func (t MessageType) String() string {
+	switch t {
+	case MessageText:
+		return "text"
+	case MessageBinary:
+		return "binary"
+	default:
+		return fmt.Sprintf("unknown(%d)", t)
+	}
+}
+
 type Conn struct {
 	rwc          io.ReadWriteCloser
 	client       bool
 	br           *bufio.Reader
 	bw           *bufio.Writer
 	writeFrameMu *mutex
+	writerMu     *mutex
 }
 
 type connConfig struct {
@@ -85,6 +97,7 @@ func newConn(cfg connConfig) *Conn {
 		br:           cfg.br,
 		bw:           cfg.bw,
 		writeFrameMu: newMutex(),
+		writerMu:     newMutex(),
 	}
 }
 
