@@ -2,7 +2,9 @@ package websocket
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -94,13 +96,47 @@ func (c *Conn) Ping(ctx context.Context) error {
 // Reader reads from the connection until there is a WebSocket data message to be read.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
-	return 0, nil, errors.New("not implemented")
+	var buf [8]byte
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, nil, err
+		}
+
+		header, payload, err := readFrame(c.br, buf[:])
+		if err != nil {
+			return 0, nil, err
+		}
+		if err := c.validateFrameHeader(header); err != nil {
+			return 0, nil, err
+		}
+
+		switch header.opCode {
+		case opText:
+			return MessageText, bytes.NewReader(payload), nil
+		case opBinary:
+			return MessageBinary, bytes.NewReader(payload), nil
+		case opPing, opPong:
+			continue
+		case opClose:
+			return 0, nil, parseClosePayload(payload)
+		default:
+			return 0, nil, errors.New("websocket: fragmented messages are not supported")
+		}
+	}
 }
 
 // Read reads a single WebSocket message from the connection.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
-	return 0, nil, errors.New("not implemented")
+	messageType, reader, err := c.Reader(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	payload, err := io.ReadAll(reader)
+	if err != nil {
+		return 0, nil, err
+	}
+	return messageType, payload, nil
 }
 
 // SetReadLimit sets the max number of bytes to read for a single message.
@@ -132,4 +168,47 @@ func (c *Conn) CloseNow() error {
 func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	// TODO: implement CloseRead
 	return ctx
+}
+
+func (c *Conn) validateFrameHeader(header frameHeader) error {
+	if header.rsv1 || header.rsv2 || header.rsv3 {
+		return errors.New("websocket: unsupported reserved bits")
+	}
+	if header.mask != !c.client {
+		return errors.New("websocket: invalid frame masking")
+	}
+
+	switch header.opCode {
+	case opText, opBinary:
+		if !header.fin {
+			return errors.New("websocket: fragmented messages are not supported")
+		}
+	case opClose, opPing, opPong:
+		if !header.fin {
+			return errors.New("websocket: fragmented control frames are not allowed")
+		}
+		if header.payloadLen > 125 {
+			return errors.New("websocket: control frame payload too large")
+		}
+	case opContinuation:
+		return errors.New("websocket: fragmented messages are not supported")
+	default:
+		return errors.New("websocket: unknown opcode")
+	}
+
+	return nil
+}
+
+func parseClosePayload(payload []byte) error {
+	if len(payload) == 0 {
+		return CloseError{Code: StatusNoStatusReceived}
+	}
+	if len(payload) == 1 {
+		return errors.New("websocket: invalid close payload")
+	}
+
+	return CloseError{
+		Code:   StatusCode(binary.BigEndian.Uint16(payload[:2])),
+		Reason: string(payload[2:]),
+	}
 }
