@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"encoding/binary"
+	"io"
 )
 
 type opCode byte
@@ -61,13 +62,13 @@ func readFrameHeader(br *bufio.Reader) (frameHeader, error) {
 	switch payloadLen {
 	case 126:
 		var buf [2]byte
-		if _, err := br.Read(buf[:]); err != nil {
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
 			return h, err
 		}
 		h.payloadLen = int64(binary.BigEndian.Uint16(buf[:]))
 	case 127:
 		var buf [8]byte
-		if _, err := br.Read(buf[:]); err != nil {
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
 			return h, err
 		}
 		h.payloadLen = int64(binary.BigEndian.Uint64(buf[:]))
@@ -78,7 +79,7 @@ func readFrameHeader(br *bufio.Reader) (frameHeader, error) {
 	// Read the mask key if necessary.
 	if h.mask {
 		var buf [4]byte
-		if _, err := br.Read(buf[:]); err != nil {
+		if _, err := io.ReadFull(br, buf[:]); err != nil {
 			return h, err
 		}
 		h.maskKey = binary.BigEndian.Uint32(buf[:])
