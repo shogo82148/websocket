@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"io"
 )
 
@@ -72,6 +73,9 @@ func readFrameHeader(br *bufio.Reader) (frameHeader, error) {
 			return h, err
 		}
 		h.payloadLen = int64(binary.BigEndian.Uint64(buf[:]))
+		if h.payloadLen < 0 {
+			return h, errors.New("websocket: invalid payload length")
+		}
 	default:
 		h.payloadLen = payloadLen
 	}

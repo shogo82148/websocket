@@ -94,6 +94,7 @@ func TestReadFrameHeader(t *testing.T) {
 		input    []byte
 		expected frameHeader
 		wantErr  error
+		wantErrText string
 	}{
 		{
 			name:  "short payload",
@@ -141,6 +142,11 @@ func TestReadFrameHeader(t *testing.T) {
 			input:   []byte{0x81, 0x85, 0x01, 0x02, 0x03},
 			wantErr: io.ErrUnexpectedEOF,
 		},
+		{
+			name:    "invalid negative payload length",
+			input:   []byte{0x81, 0x7F, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+			wantErrText: "websocket: invalid payload length",
+		},
 	}
 
 	for _, test := range tests {
@@ -151,6 +157,12 @@ func TestReadFrameHeader(t *testing.T) {
 			if test.wantErr != nil {
 				if !errors.Is(err, test.wantErr) {
 					t.Fatalf("readFrameHeader error = %v; want %v", err, test.wantErr)
+				}
+				return
+			}
+			if test.wantErrText != "" {
+				if err == nil || err.Error() != test.wantErrText {
+					t.Fatalf("readFrameHeader error = %v; want %q", err, test.wantErrText)
 				}
 				return
 			}
