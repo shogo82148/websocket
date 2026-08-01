@@ -26,6 +26,9 @@ type Conn struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
+
+	onPingReceived func(ctx context.Context, payload []byte) bool
+	onPongReceived func(ctx context.Context, payload []byte)
 }
 
 type connConfig struct {
@@ -33,6 +36,9 @@ type connConfig struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
+
+	onPingReceived func(ctx context.Context, payload []byte) bool
+	onPongReceived func(ctx context.Context, payload []byte)
 }
 
 // StatusCode represents a WebSocket status code.
@@ -85,6 +91,8 @@ func newConn(cfg connConfig) *Conn {
 		client: cfg.client,
 		br:     cfg.br,
 		bw:     cfg.bw,
+		onPingReceived: cfg.onPingReceived,
+		onPongReceived: cfg.onPongReceived,
 	}
 }
 
@@ -97,30 +105,70 @@ func (c *Conn) Ping(ctx context.Context) error {
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	var buf [8]byte
+	var messagePayload bytes.Buffer
+	var messageType MessageType
+	fragmented := false
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return 0, nil, err
 		}
 
-		header, payload, err := readFrame(c.br, buf[:])
+		header, framePayload, err := readFrame(c.br, buf[:])
 		if err != nil {
 			return 0, nil, err
 		}
-		if err := c.validateFrameHeader(header); err != nil {
+		if err := c.validateFrameHeader(header, fragmented); err != nil {
 			return 0, nil, err
 		}
 
 		switch header.opCode {
 		case opText:
-			return MessageText, bytes.NewReader(payload), nil
+			messageType = MessageText
+			if header.fin {
+				return messageType, bytes.NewReader(framePayload), nil
+			}
+			fragmented = true
+			messagePayload.Reset()
+			if _, err := messagePayload.Write(framePayload); err != nil {
+				return 0, nil, err
+			}
 		case opBinary:
-			return MessageBinary, bytes.NewReader(payload), nil
-		case opPing, opPong:
+			messageType = MessageBinary
+			if header.fin {
+				return messageType, bytes.NewReader(framePayload), nil
+			}
+			fragmented = true
+			messagePayload.Reset()
+			if _, err := messagePayload.Write(framePayload); err != nil {
+				return 0, nil, err
+			}
+		case opContinuation:
+			if _, err := messagePayload.Write(framePayload); err != nil {
+				return 0, nil, err
+			}
+			if header.fin {
+				fragmented = false
+				return messageType, bytes.NewReader(messagePayload.Bytes()), nil
+			}
+		case opPing:
+			sendPong := true
+			if c.onPingReceived != nil {
+				sendPong = c.onPingReceived(ctx, append([]byte(nil), framePayload...))
+			}
+			if sendPong {
+				if err := c.writeFrame(opPong, framePayload); err != nil {
+					return 0, nil, err
+				}
+			}
+			continue
+		case opPong:
+			if c.onPongReceived != nil {
+				c.onPongReceived(ctx, append([]byte(nil), framePayload...))
+			}
 			continue
 		case opClose:
-			return 0, nil, parseClosePayload(payload)
-		default:
-			return 0, nil, errors.New("websocket: fragmented messages are not supported")
+			return 0, nil, parseClosePayload(framePayload)
 		}
 	}
 }
@@ -170,7 +218,7 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (c *Conn) validateFrameHeader(header frameHeader) error {
+func (c *Conn) validateFrameHeader(header frameHeader, fragmented bool) error {
 	if header.rsv1 || header.rsv2 || header.rsv3 {
 		return errors.New("websocket: unsupported reserved bits")
 	}
@@ -180,8 +228,8 @@ func (c *Conn) validateFrameHeader(header frameHeader) error {
 
 	switch header.opCode {
 	case opText, opBinary:
-		if !header.fin {
-			return errors.New("websocket: fragmented messages are not supported")
+		if fragmented {
+			return errors.New("websocket: unexpected data frame in fragmented message")
 		}
 	case opClose, opPing, opPong:
 		if !header.fin {
@@ -191,7 +239,9 @@ func (c *Conn) validateFrameHeader(header frameHeader) error {
 			return errors.New("websocket: control frame payload too large")
 		}
 	case opContinuation:
-		return errors.New("websocket: fragmented messages are not supported")
+		if !fragmented {
+			return errors.New("websocket: unexpected continuation frame")
+		}
 	default:
 		return errors.New("websocket: unknown opcode")
 	}

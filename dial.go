@@ -132,6 +132,8 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		client: true,
 		br:     bufio.NewReader(rwc),
 		bw:     bufio.NewWriter(rwc),
+		onPingReceived: opts.OnPingReceived,
+		onPongReceived: opts.OnPongReceived,
 	}), resp, nil
 }
 

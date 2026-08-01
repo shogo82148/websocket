@@ -112,6 +112,200 @@ func TestConnReaderSkipsPing(t *testing.T) {
 	}
 }
 
+func TestConnReaderRespondsToPing(t *testing.T) {
+	t.Parallel()
+
+	ping := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opPing,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: int64(len("ok")),
+	}, []byte("ok"))
+	text := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opText,
+		mask:       true,
+		maskKey:    0x05060708,
+		payloadLen: int64(len("next")),
+	}, []byte("next"))
+	raw := append(ping, text...)
+	var written bytes.Buffer
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	messageType, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if messageType != MessageText {
+		t.Fatalf("Read messageType = %v, want %v", messageType, MessageText)
+	}
+	if string(payload) != "next" {
+		t.Fatalf("Read payload = %q, want %q", payload, "next")
+	}
+
+	header, pongPayload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opPong {
+		t.Fatalf("pong opcode = %v, want %v", header.opCode, opPong)
+	}
+	if header.mask {
+		t.Fatal("server pong must not be masked")
+	}
+	if string(pongPayload) != "ok" {
+		t.Fatalf("pong payload = %q, want %q", pongPayload, "ok")
+	}
+}
+
+func TestConnReaderClientRespondsToPingWithMaskedPong(t *testing.T) {
+	t.Parallel()
+
+	ping := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opPing,
+		payloadLen: int64(len("ok")),
+	}, []byte("ok"))
+	text := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opText,
+		payloadLen: int64(len("next")),
+	}, []byte("next"))
+	raw := append(ping, text...)
+	var written bytes.Buffer
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written},
+		client: true,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	messageType, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if messageType != MessageText {
+		t.Fatalf("Read messageType = %v, want %v", messageType, MessageText)
+	}
+	if string(payload) != "next" {
+		t.Fatalf("Read payload = %q, want %q", payload, "next")
+	}
+
+	header, pongPayload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opPong {
+		t.Fatalf("pong opcode = %v, want %v", header.opCode, opPong)
+	}
+	if !header.mask {
+		t.Fatal("client pong must be masked")
+	}
+	if string(pongPayload) != "ok" {
+		t.Fatalf("pong payload = %q, want %q", pongPayload, "ok")
+	}
+}
+
+func TestConnReaderCanSuppressAutomaticPong(t *testing.T) {
+	t.Parallel()
+
+	ping := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opPing,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: int64(len("ok")),
+	}, []byte("ok"))
+	text := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opText,
+		mask:       true,
+		maskKey:    0x05060708,
+		payloadLen: int64(len("next")),
+	}, []byte("next"))
+	raw := append(ping, text...)
+	var written bytes.Buffer
+	called := false
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+		onPingReceived: func(ctx context.Context, payload []byte) bool {
+			called = true
+			return false
+		},
+	})
+
+	messageType, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if !called {
+		t.Fatal("OnPingReceived was not called")
+	}
+	if messageType != MessageText {
+		t.Fatalf("Read messageType = %v, want %v", messageType, MessageText)
+	}
+	if string(payload) != "next" {
+		t.Fatalf("Read payload = %q, want %q", payload, "next")
+	}
+	if written.Len() != 0 {
+		t.Fatalf("automatic pong was not suppressed: wrote %d bytes", written.Len())
+	}
+}
+
+func TestConnReadFragmentedTextFrame(t *testing.T) {
+	t.Parallel()
+
+	first := encodeTestFrame(t, frameHeader{
+		fin:        false,
+		opCode:     opText,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: int64(len("Hel")),
+	}, []byte("Hel"))
+	ping := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opPing,
+		mask:       true,
+		maskKey:    0x05060708,
+		payloadLen: int64(len("ok")),
+	}, []byte("ok"))
+	last := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opContinuation,
+		mask:       true,
+		maskKey:    0x11121314,
+		payloadLen: int64(len("lo")),
+	}, []byte("lo"))
+	raw := append(first, ping...)
+	raw = append(raw, last...)
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: io.Discard},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(io.Discard),
+	})
+
+	messageType, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if messageType != MessageText {
+		t.Fatalf("Read messageType = %v, want %v", messageType, MessageText)
+	}
+	if string(payload) != "Hello" {
+		t.Fatalf("Read payload = %q, want %q", payload, "Hello")
+	}
+}
+
 func TestConnReadCloseFrame(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +360,29 @@ func TestConnReadRejectsInvalidMasking(t *testing.T) {
 	_, _, err := conn.Read(context.Background())
 	if err == nil || err.Error() != "websocket: invalid frame masking" {
 		t.Fatalf("Read error = %v, want invalid frame masking", err)
+	}
+}
+
+func TestConnReadRejectsUnexpectedContinuation(t *testing.T) {
+	t.Parallel()
+
+	raw := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opContinuation,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: int64(len("bad")),
+	}, []byte("bad"))
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: io.Discard},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(io.Discard),
+	})
+
+	_, _, err := conn.Read(context.Background())
+	if err == nil || err.Error() != "websocket: unexpected continuation frame" {
+		t.Fatalf("Read error = %v, want unexpected continuation frame", err)
 	}
 }
 

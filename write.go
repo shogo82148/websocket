@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"io"
 )
@@ -21,8 +23,40 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 	return nil, errors.New("not implemented")
 }
 
+func (c *Conn) writeFrame(opCode opCode, data []byte) error {
+	header := frameHeader{
+		fin:        true,
+		opCode:     opCode,
+		mask:       c.client,
+		payloadLen: int64(len(data)),
+	}
+	framePayload := data
+	if header.mask {
+		var maskKey [4]byte
+		if _, err := rand.Read(maskKey[:]); err != nil {
+			return err
+		}
+		header.maskKey = binary.BigEndian.Uint32(maskKey[:])
+		framePayload = append([]byte(nil), data...)
+		maskFramePayload(framePayload, header.maskKey)
+	}
+
+	var buf [8]byte
+	if err := writeFrameHeader(c.bw, header, buf[:]); err != nil {
+		return err
+	}
+	if _, err := c.bw.Write(framePayload); err != nil {
+		return err
+	}
+	return c.bw.Flush()
+}
+
 // Write writes a message to the connection.
 func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	var opCode opCode
 	switch messageType {
 	case MessageText:
@@ -32,17 +66,5 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 	default:
 		return errors.New("websocket: invalid message type")
 	}
-	header := frameHeader{
-		fin:        true,
-		opCode:     opCode,
-		payloadLen: int64(len(data)),
-	}
-	var buf [8]byte
-	if err := writeFrameHeader(c.bw, header, buf[:]); err != nil {
-		return err
-	}
-	if _, err := c.bw.Write(data); err != nil {
-		return err
-	}
-	return c.bw.Flush()
+	return c.writeFrame(opCode, data)
 }

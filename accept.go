@@ -80,6 +80,10 @@ var errConnectionHeaderNotUpgrade = errors.New("websocket: Connection header is 
 var errHijackerNotSupported = errors.New("websocket: hijacker is not supported")
 
 func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn, error) {
+	if opts == nil {
+		opts = new(AcceptOptions)
+	}
+
 	// validate the request
 	if !r.ProtoAtLeast(1, 1) {
 		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
@@ -138,10 +142,12 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	brw.Reader.Reset(io.MultiReader(bytes.NewReader(b), conn))
 
 	return newConn(connConfig{
-		rwc:    conn,
-		client: false,
-		br:     brw.Reader,
-		bw:     brw.Writer,
+		rwc:            conn,
+		client:         false,
+		br:             brw.Reader,
+		bw:             brw.Writer,
+		onPingReceived: opts.OnPingReceived,
+		onPongReceived: opts.OnPongReceived,
 	}), nil
 }
 
