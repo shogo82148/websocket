@@ -7,13 +7,15 @@ import (
 )
 
 func TestCloseStatus(t *testing.T) {
+	ce := CloseError{Code: StatusNormalClosure, Reason: "normal closure"}
 	tests := []struct {
 		err      error
 		expected StatusCode
 	}{
 		{nil, -1},
 		{errors.New("some error"), -1},
-		{CloseError{Code: StatusNormalClosure, Reason: "normal closure"}, StatusNormalClosure},
+		{ce, StatusNormalClosure},
+		{fmt.Errorf("wrapped: %w", ce), StatusNormalClosure},
 	}
 
 	for _, test := range tests {
