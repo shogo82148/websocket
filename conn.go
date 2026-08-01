@@ -30,6 +30,7 @@ type Conn struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
+	subprotocol string
 
 	readLimit int64
 
@@ -55,6 +56,7 @@ type connConfig struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
+	subprotocol string
 
 	onPingReceived func(ctx context.Context, payload []byte) bool
 	onPongReceived func(ctx context.Context, payload []byte)
@@ -110,6 +112,7 @@ func newConn(cfg connConfig) *Conn {
 		client:         cfg.client,
 		br:             cfg.br,
 		bw:             cfg.bw,
+		subprotocol:    cfg.subprotocol,
 		readLimit:      32768,
 		writerSem:      make(chan struct{}, 1),
 		onPingReceived: cfg.onPingReceived,
@@ -291,7 +294,7 @@ func (c *Conn) SetReadLimit(limit int64) {
 // Subprotocol returns the negotiated subprotocol.
 // An empty string means the default protocol.
 func (c *Conn) Subprotocol() string {
-	return ""
+	return c.subprotocol
 }
 
 func (c *Conn) Close(code StatusCode, reason string) error {

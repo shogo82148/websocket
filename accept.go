@@ -83,6 +83,7 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	if opts == nil {
 		opts = new(AcceptOptions)
 	}
+	subprotocol := negotiateSubprotocol(r, opts)
 
 	// validate the request
 	if !r.ProtoAtLeast(1, 1) {
@@ -130,6 +131,9 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	h.Set("Upgrade", "websocket")
 	h.Set("Connection", "Upgrade")
 	h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+	if subprotocol != "" {
+		h.Set("Sec-WebSocket-Protocol", subprotocol)
+	}
 	w.WriteHeader(http.StatusSwitchingProtocols)
 
 	conn, brw, err := hijacker.Hijack()
@@ -146,9 +150,26 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		client:         false,
 		br:             brw.Reader,
 		bw:             brw.Writer,
+		subprotocol:    subprotocol,
 		onPingReceived: opts.OnPingReceived,
 		onPongReceived: opts.OnPongReceived,
 	}), nil
+}
+
+func negotiateSubprotocol(r *http.Request, opts *AcceptOptions) string {
+	if len(opts.Subprotocols) == 0 {
+		return ""
+	}
+	accepted := make(map[string]struct{}, len(opts.Subprotocols))
+	for _, protocol := range opts.Subprotocols {
+		accepted[protocol] = struct{}{}
+	}
+	for protocol := range headerTokens(r.Header, "Sec-WebSocket-Protocol") {
+		if _, ok := accepted[protocol]; ok {
+			return protocol
+		}
+	}
+	return ""
 }
 
 func headerContainsTokenIgnoreCase(h http.Header, key, token string) bool {

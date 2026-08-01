@@ -132,6 +132,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		client: true,
 		br:     bufio.NewReader(rwc),
 		bw:     bufio.NewWriter(rwc),
+		subprotocol: resp.Header.Get("Sec-WebSocket-Protocol"),
 		onPingReceived: opts.OnPingReceived,
 		onPongReceived: opts.OnPongReceived,
 	}), resp, nil
@@ -209,5 +210,20 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 	if got := resp.Header.Get("Sec-WebSocket-Accept"); got != expectedAccept {
 		return fmt.Errorf("websocket: Sec-WebSocket-Accept mismatch: got %q, want %q", got, expectedAccept)
 	}
+	if err := verifySubprotocol(resp.Header.Get("Sec-WebSocket-Protocol"), opts.Subprotocols); err != nil {
+		return err
+	}
 	return nil
+}
+
+func verifySubprotocol(got string, requested []string) error {
+	if got == "" {
+		return nil
+	}
+	for _, protocol := range requested {
+		if got == protocol {
+			return nil
+		}
+	}
+	return fmt.Errorf("websocket: unexpected subprotocol: %q", got)
 }
