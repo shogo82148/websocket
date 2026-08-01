@@ -20,10 +20,11 @@ const (
 )
 
 type Conn struct {
-	rwc    io.ReadWriteCloser
-	client bool
-	br     *bufio.Reader
-	bw     *bufio.Writer
+	rwc          io.ReadWriteCloser
+	client       bool
+	br           *bufio.Reader
+	bw           *bufio.Writer
+	writeFrameMu *mutex
 }
 
 type connConfig struct {
@@ -103,20 +104,6 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	return 0, nil, errors.New("not implemented")
 }
 
-// Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
-//
-// You must close the writer once you have written the entire message.
-//
-// Only one writer can be open at a time, multiple calls will block until the previous writer is closed.
-func (c *Conn) Writer(ctx context.Context, dataType MessageType) (io.WriteCloser, error) {
-	return nil, errors.New("not implemented")
-}
-
-// Write writes a message to the connection.
-func (c *Conn) Write(ctx context.Context, dataType MessageType, data []byte) error {
-	return errors.New("not implemented")
-}
-
 // SetReadLimit sets the max number of bytes to read for a single message.
 // It applies to the Reader and Read methods.
 //
@@ -147,3 +134,29 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	// TODO: implement CloseRead
 	return ctx
 }
+
+// mutex is a mutex that can be locked and unlocked with a context.Context.
+type mutex struct {
+	_  noCopy
+	ch chan struct{}
+}
+
+func (m *mutex) lock(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
+	case m.ch <- struct{}{}:
+		return nil
+	}
+}
+
+func (m *mutex) unlock() {
+	select {
+	case <-m.ch:
+	}
+}
+
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}

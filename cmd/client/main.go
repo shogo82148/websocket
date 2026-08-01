@@ -2,18 +2,22 @@ package main
 
 import (
 	"context"
-	"time"
+	"log"
 
 	"github.com/shogo82148/websocket"
 )
 
 func main() {
-	conn, resp, err := websocket.Dial(context.Background(), "ws://localhost:8080/", nil)
+	ctx := context.Background()
+	conn, resp, err := websocket.Dial(ctx, "ws://localhost:8080/", nil)
 	if err != nil {
 		panic(err)
 	}
 	_ = resp
 	defer conn.CloseNow()
 
-	time.Sleep(time.Second)
+	if err := conn.Write(ctx, websocket.MessageText, []byte("Hello WebSocket!")); err != nil {
+		log.Println(err)
+		return
+	}
 }
