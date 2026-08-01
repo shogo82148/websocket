@@ -5,7 +5,10 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"iter"
 	"net/http"
+	"strings"
 )
 
 type CompressionMode int
@@ -70,10 +73,42 @@ func hijacker(w http.ResponseWriter) (http.Hijacker, bool) {
 	}
 }
 
+var errUpgradeHeaderNotWebSocket = errors.New("websocket: Upgrade header is not websocket")
+var errConnectionHeaderNotUpgrade = errors.New("websocket: Connection header is not Upgrade")
 var errHijackerNotSupported = errors.New("websocket: hijacker is not supported")
 
 func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn, error) {
-	// TODO: validate method, headers, and version
+	// validate the request
+	if !r.ProtoAtLeast(1, 1) {
+		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
+		return nil, fmt.Errorf("websocket: HTTP version not supported: %s", r.Proto)
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return nil, fmt.Errorf("websocket: method not allowed: %s", r.Method)
+	}
+	if !headerContainsTokenIgnoreCase(r.Header, "Upgrade", "websocket") {
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
+		return nil, errUpgradeHeaderNotWebSocket
+	}
+	if !headerContainsTokenIgnoreCase(r.Header, "Connection", "Upgrade") {
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
+		return nil, errConnectionHeaderNotUpgrade
+	}
+	if version := r.Header.Get("Sec-WebSocket-Version"); version != "13" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return nil, fmt.Errorf("websocket: unsupported version: %s", version)
+	}
+	key, err := getWebSocketKey(r)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return nil, err
+	}
+
 	// TODO: validate origin
 
 	hijacker, ok := hijacker(w)
@@ -83,7 +118,6 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	}
 
 	// Upgrade to WebSocket
-	key := r.Header.Get("Sec-WebSocket-Key")
 	h := w.Header()
 	h.Set("Upgrade", "websocket")
 	h.Set("Connection", "Upgrade")
@@ -98,6 +132,40 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		conn: conn,
 		rw:   rw,
 	}, nil
+}
+
+func headerContainsTokenIgnoreCase(h http.Header, key, token string) bool {
+	for t := range headerTokens(h, key) {
+		if strings.EqualFold(t, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func headerTokens(h http.Header, key string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for _, v := range h.Values(key) {
+			for token := range strings.SplitSeq(v, ",") {
+				token := strings.TrimSpace(token)
+				if !yield(token) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func getWebSocketKey(r *http.Request) (string, error) {
+	key := r.Header.Get("Sec-WebSocket-Key")
+	data, err := base64.StdEncoding.DecodeString(key)
+	if err != nil {
+		return "", fmt.Errorf("websocket: invalid Sec-WebSocket-Key: %v", err)
+	}
+	if len(data) != 16 {
+		return "", fmt.Errorf("websocket: invalid Sec-WebSocket-Key length: %d", len(data))
+	}
+	return key, nil
 }
 
 var websocketGUID = []byte("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
