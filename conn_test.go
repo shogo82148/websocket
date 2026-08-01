@@ -656,6 +656,110 @@ func TestConnCloseRejectsInvalidCode(t *testing.T) {
 	}
 }
 
+func TestConnCloseRead(t *testing.T) {
+	t.Parallel()
+
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+
+	conn := newConn(connConfig{
+		rwc:    local,
+		client: false,
+		br:     bufio.NewReader(local),
+		bw:     bufio.NewWriter(local),
+	})
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	closeReadCtx := conn.CloseRead(parentCtx)
+	if closeReadCtx == parentCtx {
+		t.Fatal("CloseRead should return a derived context")
+	}
+	if conn.CloseRead(context.Background()) != closeReadCtx {
+		t.Fatal("CloseRead should return the same context on repeated calls")
+	}
+
+	peerErrCh := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(remote)
+		writer := bufio.NewWriter(remote)
+
+		frames := [][]byte{
+			encodeTestFrame(t, frameHeader{
+				fin:        true,
+				opCode:     opText,
+				mask:       true,
+				maskKey:    0x01020304,
+				payloadLen: int64(len("ignored")),
+			}, []byte("ignored")),
+			encodeTestFrame(t, frameHeader{
+				fin:        true,
+				opCode:     opPing,
+				mask:       true,
+				maskKey:    0x05060708,
+				payloadLen: int64(len("ok")),
+			}, []byte("ok")),
+			encodeTestFrame(t, frameHeader{
+				fin:        true,
+				opCode:     opClose,
+				mask:       true,
+				maskKey:    0x11121314,
+				payloadLen: 2,
+			}, []byte{0x03, 0xe8}),
+		}
+		for _, frame := range frames {
+			if _, err := writer.Write(frame); err != nil {
+				peerErrCh <- err
+				return
+			}
+		}
+		if err := writer.Flush(); err != nil {
+			peerErrCh <- err
+			return
+		}
+
+		var buf [8]byte
+		header, payload, err := readFrame(reader, buf[:])
+		if err != nil {
+			peerErrCh <- err
+			return
+		}
+		if header.opCode != opPong {
+			peerErrCh <- fmt.Errorf("first reply opcode = %v, want %v", header.opCode, opPong)
+			return
+		}
+		if string(payload) != "ok" {
+			peerErrCh <- fmt.Errorf("pong payload = %q, want %q", payload, "ok")
+			return
+		}
+
+		header, payload, err = readFrame(reader, buf[:])
+		if err != nil {
+			peerErrCh <- err
+			return
+		}
+		if header.opCode != opClose {
+			peerErrCh <- fmt.Errorf("second reply opcode = %v, want %v", header.opCode, opClose)
+			return
+		}
+		if !bytes.Equal(payload, []byte{0x03, 0xe8}) {
+			peerErrCh <- fmt.Errorf("close payload = %v, want %v", payload, []byte{0x03, 0xe8})
+			return
+		}
+		peerErrCh <- nil
+	}()
+
+	select {
+	case <-closeReadCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("CloseRead context was not canceled after receiving close")
+	}
+	if err := <-peerErrCh; err != nil {
+		t.Fatalf("peer failed: %v", err)
+	}
+}
+
 func encodeTestFrame(t *testing.T, header frameHeader, payload []byte) []byte {
 	t.Helper()
 

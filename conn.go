@@ -35,6 +35,9 @@ type Conn struct {
 	writeMu sync.Mutex
 	pongMu  sync.Mutex
 	pongAck *pongAck
+
+	closeReadMu  sync.Mutex
+	closeReadCtx context.Context
 }
 
 type pongAck struct {
@@ -98,10 +101,10 @@ func CloseStatus(err error) StatusCode {
 
 func newConn(cfg connConfig) *Conn {
 	return &Conn{
-		rwc:    cfg.rwc,
-		client: cfg.client,
-		br:     cfg.br,
-		bw:     cfg.bw,
+		rwc:            cfg.rwc,
+		client:         cfg.client,
+		br:             cfg.br,
+		bw:             cfg.bw,
 		onPingReceived: cfg.onPingReceived,
 		onPongReceived: cfg.onPongReceived,
 	}
@@ -291,8 +294,30 @@ func (c *Conn) CloseNow() error {
 }
 
 func (c *Conn) CloseRead(ctx context.Context) context.Context {
-	// TODO: implement CloseRead
-	return ctx
+	c.closeReadMu.Lock()
+	if c.closeReadCtx != nil {
+		closeReadCtx := c.closeReadCtx
+		c.closeReadMu.Unlock()
+		return closeReadCtx
+	}
+	closeReadCtx, cancel := context.WithCancel(ctx)
+	c.closeReadCtx = closeReadCtx
+	c.closeReadMu.Unlock()
+
+	go func() {
+		defer cancel()
+		for {
+			_, reader, err := c.Reader(closeReadCtx)
+			if err != nil {
+				return
+			}
+			if _, err := io.Copy(io.Discard, reader); err != nil {
+				return
+			}
+		}
+	}()
+
+	return closeReadCtx
 }
 
 func (c *Conn) handleCloseFrame(payload []byte) error {
