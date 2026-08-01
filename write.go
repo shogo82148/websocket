@@ -24,7 +24,7 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 }
 
 func (w *messageWriter) Close() error {
-	err := w.conn.writeFrame(w.ctx, true, opContinuation, nil)
+	err := w.conn.writeFrame(w.ctx, true, w.opCode, nil)
 	w.conn.writerMu.unlock()
 	return err
 }
