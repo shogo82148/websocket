@@ -862,6 +862,151 @@ func TestConnCloseRead(t *testing.T) {
 	}
 }
 
+func TestConnWriter(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	writer, err := conn.Writer(context.Background(), MessageText)
+	if err != nil {
+		t.Fatalf("Writer failed: %v", err)
+	}
+	if _, err := writer.Write([]byte("Hello")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if _, err := writer.Write([]byte(" Writer")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opText {
+		t.Fatalf("opcode = %v, want %v", header.opCode, opText)
+	}
+	if string(payload) != "Hello Writer" {
+		t.Fatalf("payload = %q, want %q", payload, "Hello Writer")
+	}
+}
+
+func TestConnWriterClientMasksFrame(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written},
+		client: true,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	writer, err := conn.Writer(context.Background(), MessageBinary)
+	if err != nil {
+		t.Fatalf("Writer failed: %v", err)
+	}
+	if _, err := writer.Write([]byte{0x01, 0x02, 0x03}); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opBinary {
+		t.Fatalf("opcode = %v, want %v", header.opCode, opBinary)
+	}
+	if !header.mask {
+		t.Fatal("client writer frame must be masked")
+	}
+	if !bytes.Equal(payload, []byte{0x01, 0x02, 0x03}) {
+		t.Fatalf("payload = %v, want %v", payload, []byte{0x01, 0x02, 0x03})
+	}
+}
+
+func TestConnWriterBlocksUntilPreviousClose(t *testing.T) {
+	t.Parallel()
+
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(nil), Writer: io.Discard},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(io.Discard),
+	})
+
+	first, err := conn.Writer(context.Background(), MessageText)
+	if err != nil {
+		t.Fatalf("first Writer failed: %v", err)
+	}
+
+	secondReady := make(chan struct {
+		writer io.WriteCloser
+		err    error
+	}, 1)
+	go func() {
+		writer, err := conn.Writer(context.Background(), MessageBinary)
+		secondReady <- struct {
+			writer io.WriteCloser
+			err    error
+		}{writer: writer, err: err}
+	}()
+
+	select {
+	case <-secondReady:
+		t.Fatal("second Writer returned before first writer was closed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close failed: %v", err)
+	}
+	result := <-secondReady
+	if result.err != nil {
+		t.Fatalf("second Writer failed: %v", result.err)
+	}
+	if err := result.writer.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+}
+
+func TestConnWriterHonorsContextWhileWaiting(t *testing.T) {
+	t.Parallel()
+
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(nil), Writer: io.Discard},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(io.Discard),
+	})
+
+	writer, err := conn.Writer(context.Background(), MessageText)
+	if err != nil {
+		t.Fatalf("Writer failed: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = conn.Writer(ctx, MessageBinary)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Writer error = %v, want context.Canceled", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+}
+
 func encodeTestFrame(t *testing.T, header frameHeader, payload []byte) []byte {
 	t.Helper()
 

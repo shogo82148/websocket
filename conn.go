@@ -37,6 +37,7 @@ type Conn struct {
 	onPongReceived func(ctx context.Context, payload []byte)
 
 	writeMu sync.Mutex
+	writerSem chan struct{}
 	pongMu  sync.Mutex
 	pongAck *pongAck
 
@@ -110,6 +111,7 @@ func newConn(cfg connConfig) *Conn {
 		br:             cfg.br,
 		bw:             cfg.bw,
 		readLimit:      32768,
+		writerSem:      make(chan struct{}, 1),
 		onPingReceived: cfg.onPingReceived,
 		onPongReceived: cfg.onPongReceived,
 	}
