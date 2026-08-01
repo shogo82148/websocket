@@ -19,11 +19,24 @@ const (
 	MessageBinary MessageType = 2
 )
 
+func (t MessageType) String() string {
+	switch t {
+	case MessageText:
+		return "text"
+	case MessageBinary:
+		return "binary"
+	default:
+		return fmt.Sprintf("unknown(%d)", t)
+	}
+}
+
 type Conn struct {
-	rwc    io.ReadWriteCloser
-	client bool
-	br     *bufio.Reader
-	bw     *bufio.Writer
+	rwc          io.ReadWriteCloser
+	client       bool
+	br           *bufio.Reader
+	bw           *bufio.Writer
+	writeFrameMu *mutex
+	writerMu     *mutex
 }
 
 type connConfig struct {
@@ -79,10 +92,12 @@ func CloseStatus(err error) StatusCode {
 
 func newConn(cfg connConfig) *Conn {
 	return &Conn{
-		rwc:    cfg.rwc,
-		client: cfg.client,
-		br:     cfg.br,
-		bw:     cfg.bw,
+		rwc:          cfg.rwc,
+		client:       cfg.client,
+		br:           cfg.br,
+		bw:           cfg.bw,
+		writeFrameMu: newMutex(),
+		writerMu:     newMutex(),
 	}
 }
 
@@ -101,20 +116,6 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	return 0, nil, errors.New("not implemented")
-}
-
-// Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
-//
-// You must close the writer once you have written the entire message.
-//
-// Only one writer can be open at a time, multiple calls will block until the previous writer is closed.
-func (c *Conn) Writer(ctx context.Context, dataType MessageType) (io.WriteCloser, error) {
-	return nil, errors.New("not implemented")
-}
-
-// Write writes a message to the connection.
-func (c *Conn) Write(ctx context.Context, dataType MessageType, data []byte) error {
-	return errors.New("not implemented")
 }
 
 // SetReadLimit sets the max number of bytes to read for a single message.
@@ -147,3 +148,35 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	// TODO: implement CloseRead
 	return ctx
 }
+
+// mutex is a mutex that can be locked and unlocked with a context.Context.
+type mutex struct {
+	_  noCopy
+	ch chan struct{}
+}
+
+func newMutex() *mutex {
+	return &mutex{
+		ch: make(chan struct{}, 1),
+	}
+}
+
+func (m *mutex) lock(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
+	case m.ch <- struct{}{}:
+		return nil
+	}
+}
+
+func (m *mutex) unlock() {
+	<-m.ch
+}
+
+// noCopy may be embedded into structs which must not be copied after the first use.
+// ref. https://shogo82148.github.io/blog/2018/05/16/macopy-is-struct/
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
