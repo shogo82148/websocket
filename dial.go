@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type DialOptions struct {
@@ -113,16 +115,16 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 
 	resp, err := handshakeRequest(ctx, u, secWebSocketKey, opts)
 	if err != nil {
-		return nil, resp, err
+		return nil, nil, err
 	}
 
 	if err := verifyServerResponse(resp, secWebSocketKey, opts); err != nil {
-		return nil, resp, err
+		return nil, readResponseBody(resp), err
 	}
 
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
-		return nil, resp, errors.New("websocket: response body is not a ReadWriteCloser")
+		return nil, readResponseBody(resp), errors.New("websocket: response body is not a ReadWriteCloser")
 	}
 
 	return newConn(connConfig{
@@ -131,6 +133,22 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		br:     bufio.NewReader(rwc),
 		bw:     bufio.NewWriter(rwc),
 	}), resp, nil
+}
+
+// readResponseBody reads a bit of the body for easier debugging.
+// It returns a new response with the body replaced by a ReadCloser that reads the buffered data first.
+func readResponseBody(resp *http.Response) *http.Response {
+	respBody := resp.Body
+	timer := time.AfterFunc(time.Second*3, func() {
+		respBody.Close()
+	})
+	defer timer.Stop()
+
+	r := io.LimitReader(respBody, 1024)
+	buf, _ := io.ReadAll(r)
+	respBody.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(buf))
+	return resp
 }
 
 func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *DialOptions) (*http.Response, error) {
