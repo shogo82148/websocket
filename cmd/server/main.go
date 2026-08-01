@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/shogo82148/websocket"
@@ -15,12 +16,9 @@ func main() {
 		defer conn.CloseNow()
 
 		ctx := r.Context()
-		writer, err := conn.Writer(ctx, websocket.MessageText)
+		err = conn.Write(ctx, websocket.MessageText, []byte("Hello WebSocket!"))
 		if err != nil {
-			return
-		}
-		_, err = writer.Write([]byte("Hello WebSocket!"))
-		if err != nil {
+			log.Println(err)
 			return
 		}
 	})

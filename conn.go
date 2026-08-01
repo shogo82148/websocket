@@ -103,20 +103,6 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	return 0, nil, errors.New("not implemented")
 }
 
-// Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
-//
-// You must close the writer once you have written the entire message.
-//
-// Only one writer can be open at a time, multiple calls will block until the previous writer is closed.
-func (c *Conn) Writer(ctx context.Context, dataType MessageType) (io.WriteCloser, error) {
-	return nil, errors.New("not implemented")
-}
-
-// Write writes a message to the connection.
-func (c *Conn) Write(ctx context.Context, dataType MessageType, data []byte) error {
-	return errors.New("not implemented")
-}
-
 // SetReadLimit sets the max number of bytes to read for a single message.
 // It applies to the Reader and Read methods.
 //
