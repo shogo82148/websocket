@@ -12,6 +12,8 @@ import (
 	"sync"
 )
 
+var ErrMessageTooBig = errors.New("websocket: message too big")
+
 // MessageType represents the type of a WebSocket message.
 type MessageType int
 
@@ -28,6 +30,8 @@ type Conn struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
+
+	readLimit int64
 
 	onPingReceived func(ctx context.Context, payload []byte) bool
 	onPongReceived func(ctx context.Context, payload []byte)
@@ -105,6 +109,7 @@ func newConn(cfg connConfig) *Conn {
 		client:         cfg.client,
 		br:             cfg.br,
 		bw:             cfg.bw,
+		readLimit:      32768,
 		onPingReceived: cfg.onPingReceived,
 		onPongReceived: cfg.onPongReceived,
 	}
@@ -174,6 +179,9 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		switch header.opCode {
 		case opText:
 			messageType = MessageText
+			if err := c.checkReadLimit(int64(len(framePayload))); err != nil {
+				return 0, nil, err
+			}
 			if header.fin {
 				return messageType, bytes.NewReader(framePayload), nil
 			}
@@ -184,6 +192,9 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 			}
 		case opBinary:
 			messageType = MessageBinary
+			if err := c.checkReadLimit(int64(len(framePayload))); err != nil {
+				return 0, nil, err
+			}
 			if header.fin {
 				return messageType, bytes.NewReader(framePayload), nil
 			}
@@ -193,6 +204,9 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 				return 0, nil, err
 			}
 		case opContinuation:
+			if err := c.checkReadLimit(int64(messagePayload.Len()) + int64(len(framePayload))); err != nil {
+				return 0, nil, err
+			}
 			if _, err := messagePayload.Write(framePayload); err != nil {
 				return 0, nil, err
 			}
@@ -269,7 +283,7 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 //
 // Set to -1 to disable.
 func (c *Conn) SetReadLimit(limit int64) {
-	// TODO: implement SetReadLimit
+	c.readLimit = limit
 }
 
 // Subprotocol returns the negotiated subprotocol.
@@ -339,6 +353,16 @@ func (c *Conn) handleCloseFrame(payload []byte) error {
 		return writeErr
 	}
 	return closeErr
+}
+
+func (c *Conn) checkReadLimit(messageSize int64) error {
+	if c.readLimit >= 0 && messageSize > c.readLimit {
+		if err := c.Close(StatusMessageTooBig, ""); err != nil {
+			return errors.Join(ErrMessageTooBig, err)
+		}
+		return ErrMessageTooBig
+	}
+	return nil
 }
 
 func (c *Conn) validateFrameHeader(header frameHeader, fragmented bool) error {

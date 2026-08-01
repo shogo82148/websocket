@@ -656,6 +656,108 @@ func TestConnCloseRejectsInvalidCode(t *testing.T) {
 	}
 }
 
+func TestConnReadLimit(t *testing.T) {
+	t.Parallel()
+
+	raw := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opText,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: 32769,
+	}, bytes.Repeat([]byte{'a'}, 32769))
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	_, _, err := conn.Read(context.Background())
+	if !errors.Is(err, ErrMessageTooBig) {
+		t.Fatalf("Read error = %v, want ErrMessageTooBig", err)
+	}
+	if !rwc.closed {
+		t.Fatal("Read did not close the underlying transport on read limit violation")
+	}
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opClose {
+		t.Fatalf("close opcode = %v, want %v", header.opCode, opClose)
+	}
+	if got := binary.BigEndian.Uint16(payload[:2]); got != uint16(StatusMessageTooBig) {
+		t.Fatalf("close code = %d, want %d", got, StatusMessageTooBig)
+	}
+}
+
+func TestConnReadLimitAcrossFragments(t *testing.T) {
+	t.Parallel()
+
+	first := encodeTestFrame(t, frameHeader{
+		fin:        false,
+		opCode:     opText,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: 5,
+	}, []byte("Hello"))
+	last := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opContinuation,
+		mask:       true,
+		maskKey:    0x05060708,
+		payloadLen: 1,
+	}, []byte("!"))
+	raw := append(first, last...)
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+	})
+	conn.SetReadLimit(5)
+
+	_, _, err := conn.Read(context.Background())
+	if !errors.Is(err, ErrMessageTooBig) {
+		t.Fatalf("Read error = %v, want ErrMessageTooBig", err)
+	}
+}
+
+func TestConnReadLimitDisabled(t *testing.T) {
+	t.Parallel()
+
+	raw := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opBinary,
+		mask:       true,
+		maskKey:    0x01020304,
+		payloadLen: 10,
+	}, bytes.Repeat([]byte{'b'}, 10))
+	conn := newConn(connConfig{
+		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: io.Discard},
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(io.Discard),
+	})
+	conn.SetReadLimit(-1)
+
+	messageType, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if messageType != MessageBinary {
+		t.Fatalf("Read messageType = %v, want %v", messageType, MessageBinary)
+	}
+	if len(payload) != 10 {
+		t.Fatalf("Read payload length = %d, want %d", len(payload), 10)
+	}
+}
+
 func TestConnCloseRead(t *testing.T) {
 	t.Parallel()
 
