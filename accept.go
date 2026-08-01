@@ -99,9 +99,11 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
 		return nil, errConnectionHeaderNotUpgrade
 	}
-	if version := r.Header.Get("Sec-WebSocket-Version"); version != "13" {
+	if versions := r.Header.Values("Sec-WebSocket-Version"); len(versions) != 1 || versions[0] != "13" {
+		version := strings.Join(versions, ", ")
+		w.Header().Set("Sec-WebSocket-Version", "13")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return nil, fmt.Errorf("websocket: unsupported version: %s", version)
+		return nil, fmt.Errorf("websocket: unsupported version: %q", version)
 	}
 	key, err := getWebSocketKey(r)
 	if err != nil {

@@ -199,6 +199,9 @@ func TestAccept(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 		}
+		if resp.Header.Get("Sec-WebSocket-Version") != "13" {
+			t.Errorf("unexpected Sec-WebSocket-Version header: got %q, want %q", resp.Header.Get("Sec-WebSocket-Version"), "13")
+		}
 	})
 
 	t.Run("missing websocket key", func(t *testing.T) {
