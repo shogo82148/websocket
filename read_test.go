@@ -134,4 +134,26 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("third Read = (%d, %q); want (1, %q)", n, buf[:n], "o")
 		}
 	})
+
+	t.Run("zero-byte final frame returns EOF immediately", func(t *testing.T) {
+		frame := buildFrameForTest(t, true, opText, nil)
+		conn := newTestConnWithInput(t, frame)
+
+		typ, r, err := conn.Reader(context.Background())
+		if err != nil {
+			t.Fatalf("Reader failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+
+		buf := make([]byte, 8)
+		n, err := r.Read(buf)
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("Read error = %v; want %v", err, io.EOF)
+		}
+		if n != 0 {
+			t.Fatalf("Read n = %d; want 0", n)
+		}
+	})
 }

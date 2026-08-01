@@ -13,6 +13,9 @@ type messageReader struct {
 
 func (r *messageReader) Read(p []byte) (int, error) {
 	if r.payloadLen <= 0 {
+		if r.fin {
+			return 0, io.EOF
+		}
 		h, err := r.conn.readLoop()
 		if err != nil {
 			return 0, err
