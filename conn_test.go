@@ -332,11 +332,13 @@ func TestConnReadCloseFrame(t *testing.T) {
 		maskKey:    0x01020304,
 		payloadLen: int64(len(closePayload)),
 	}, closePayload)
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written}
 	conn := newConn(connConfig{
-		rwc:    nopReadWriteCloser{Reader: bytes.NewReader(raw), Writer: io.Discard},
+		rwc:    rwc,
 		client: false,
 		br:     bufio.NewReader(bytes.NewReader(raw)),
-		bw:     bufio.NewWriter(io.Discard),
+		bw:     bufio.NewWriter(&written),
 	})
 
 	_, _, err := conn.Read(context.Background())
@@ -352,6 +354,57 @@ func TestConnReadCloseFrame(t *testing.T) {
 	}
 	if closeErr.Reason != "bye" {
 		t.Fatalf("CloseError.Reason = %q, want %q", closeErr.Reason, "bye")
+	}
+	if !rwc.closed {
+		t.Fatal("Read did not close the underlying transport after receiving close")
+	}
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opClose {
+		t.Fatalf("close reply opcode = %v, want %v", header.opCode, opClose)
+	}
+	if header.mask {
+		t.Fatal("server close reply must not be masked")
+	}
+	if !bytes.Equal(payload, closePayload) {
+		t.Fatalf("close reply payload = %v, want %v", payload, closePayload)
+	}
+}
+
+func TestConnReadCloseFrameClientMasksReply(t *testing.T) {
+	t.Parallel()
+
+	closePayload := make([]byte, 2)
+	binary.BigEndian.PutUint16(closePayload[:2], uint16(StatusNormalClosure))
+	raw := encodeTestFrame(t, frameHeader{
+		fin:        true,
+		opCode:     opClose,
+		payloadLen: int64(len(closePayload)),
+	}, closePayload)
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(raw), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: true,
+		br:     bufio.NewReader(bytes.NewReader(raw)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	_, _, err := conn.Read(context.Background())
+	if err == nil {
+		t.Fatal("Read error = nil, want CloseError")
+	}
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if !header.mask {
+		t.Fatal("client close reply must be masked")
+	}
+	if !bytes.Equal(payload, closePayload) {
+		t.Fatalf("close reply payload = %v, want %v", payload, closePayload)
 	}
 }
 

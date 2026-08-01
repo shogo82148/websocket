@@ -215,7 +215,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 			c.ackPong(framePayload)
 			continue
 		case opClose:
-			return 0, nil, parseClosePayload(framePayload)
+			return 0, nil, c.handleCloseFrame(framePayload)
 		}
 	}
 }
@@ -293,6 +293,27 @@ func (c *Conn) CloseNow() error {
 func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	// TODO: implement CloseRead
 	return ctx
+}
+
+func (c *Conn) handleCloseFrame(payload []byte) error {
+	err := parseClosePayload(payload)
+	responsePayload := payload
+	if err != nil && CloseStatus(err) == -1 {
+		protocolPayload, protocolErr := closePayload(StatusProtocolError, "")
+		if protocolErr == nil {
+			responsePayload = protocolPayload
+		}
+	}
+
+	writeErr := c.writeFrame(opClose, responsePayload)
+	closeErr := c.rwc.Close()
+	if err != nil {
+		return err
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 func (c *Conn) validateFrameHeader(header frameHeader, fragmented bool) error {
