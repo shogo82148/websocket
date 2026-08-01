@@ -276,11 +276,18 @@ func (c *Conn) Subprotocol() string {
 }
 
 func (c *Conn) Close(code StatusCode, reason string) error {
-	return errors.New("not implemented")
+	payload, err := closePayload(code, reason)
+	if err != nil {
+		return err
+	}
+	if err := c.writeFrame(opClose, payload); err != nil {
+		return err
+	}
+	return c.rwc.Close()
 }
 
 func (c *Conn) CloseNow() error {
-	return errors.New("not implemented")
+	return c.rwc.Close()
 }
 
 func (c *Conn) CloseRead(ctx context.Context) context.Context {
@@ -331,4 +338,36 @@ func parseClosePayload(payload []byte) error {
 		Code:   StatusCode(binary.BigEndian.Uint16(payload[:2])),
 		Reason: string(payload[2:]),
 	}
+}
+
+func closePayload(code StatusCode, reason string) ([]byte, error) {
+	if code == StatusNoStatusReceived {
+		if reason != "" {
+			return nil, errors.New("websocket: close reason requires a status code")
+		}
+		return nil, nil
+	}
+	if !validCloseCode(code) {
+		return nil, fmt.Errorf("websocket: invalid close code: %d", code)
+	}
+	if len(reason) > 123 {
+		return nil, errors.New("websocket: close reason too long")
+	}
+
+	payload := make([]byte, 2+len(reason))
+	binary.BigEndian.PutUint16(payload[:2], uint16(code))
+	copy(payload[2:], reason)
+	return payload, nil
+}
+
+func validCloseCode(code StatusCode) bool {
+	if code >= 1000 && code <= 1015 {
+		switch code {
+		case StatusNoStatusReceived, StatusAbnormalClosure, StatusTLSHandshake:
+			return false
+		default:
+			return true
+		}
+	}
+	return code >= 3000 && code <= 4999
 }

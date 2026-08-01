@@ -22,6 +22,17 @@ func (nopReadWriteCloser) Close() error {
 	return nil
 }
 
+type closeSpyReadWriteCloser struct {
+	io.Reader
+	io.Writer
+	closed bool
+}
+
+func (c *closeSpyReadWriteCloser) Close() error {
+	c.closed = true
+	return nil
+}
+
 func TestCloseStatus(t *testing.T) {
 	ce := CloseError{Code: StatusNormalClosure, Reason: "normal closure"}
 	tests := []struct {
@@ -480,6 +491,115 @@ func TestConnPing(t *testing.T) {
 	}
 	if string(result.payload) != "next" {
 		t.Fatalf("Read payload = %q, want %q", result.payload, "next")
+	}
+}
+
+func TestConnClose(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	if err := conn.Close(StatusGoingAway, "bye"); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if !rwc.closed {
+		t.Fatal("Close did not close the underlying transport")
+	}
+
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if header.opCode != opClose {
+		t.Fatalf("close opcode = %v, want %v", header.opCode, opClose)
+	}
+	if header.mask {
+		t.Fatal("server close must not be masked")
+	}
+	if got := binary.BigEndian.Uint16(payload[:2]); got != uint16(StatusGoingAway) {
+		t.Fatalf("close code = %d, want %d", got, StatusGoingAway)
+	}
+	if got := string(payload[2:]); got != "bye" {
+		t.Fatalf("close reason = %q, want %q", got, "bye")
+	}
+}
+
+func TestConnCloseClientMasksFrame(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: true,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	if err := conn.Close(StatusNormalClosure, ""); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	header, payload, err := readFrame(bufio.NewReader(bytes.NewReader(written.Bytes())), make([]byte, 8))
+	if err != nil {
+		t.Fatalf("readFrame failed: %v", err)
+	}
+	if !header.mask {
+		t.Fatal("client close must be masked")
+	}
+	if got := binary.BigEndian.Uint16(payload[:2]); got != uint16(StatusNormalClosure) {
+		t.Fatalf("close code = %d, want %d", got, StatusNormalClosure)
+	}
+}
+
+func TestConnCloseNow(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	if err := conn.CloseNow(); err != nil {
+		t.Fatalf("CloseNow failed: %v", err)
+	}
+	if !rwc.closed {
+		t.Fatal("CloseNow did not close the underlying transport")
+	}
+	if written.Len() != 0 {
+		t.Fatalf("CloseNow wrote %d bytes, want 0", written.Len())
+	}
+}
+
+func TestConnCloseRejectsInvalidCode(t *testing.T) {
+	t.Parallel()
+
+	var written bytes.Buffer
+	rwc := &closeSpyReadWriteCloser{Reader: bytes.NewReader(nil), Writer: &written}
+	conn := newConn(connConfig{
+		rwc:    rwc,
+		client: false,
+		br:     bufio.NewReader(bytes.NewReader(nil)),
+		bw:     bufio.NewWriter(&written),
+	})
+
+	err := conn.Close(StatusNoStatusReceived, "bye")
+	if err == nil || err.Error() != "websocket: close reason requires a status code" {
+		t.Fatalf("Close error = %v, want close reason requires a status code", err)
+	}
+	if rwc.closed {
+		t.Fatal("Close closed the transport on invalid input")
 	}
 }
 
