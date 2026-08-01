@@ -89,9 +89,9 @@ func (opts *DialOptions) cloneWithDefaults(ctx context.Context) (context.Context
 	}
 	if t, ok := transport.(*http.Transport); ok {
 		newTransport := t.Clone()
-		t.Protocols = new(http.Protocols)
-		t.Protocols.SetHTTP1(true)
-		o.HTTPClient.Transport = newTransport
+		newTransport.Protocols = new(http.Protocols)
+		newTransport.Protocols.SetHTTP1(true)
+		newClient.Transport = newTransport
 	}
 
 	o.HTTPClient = &newClient
