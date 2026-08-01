@@ -1,10 +1,12 @@
 package websocket
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 )
 
 // MessageType represents the type of a WebSocket message.
@@ -18,7 +20,10 @@ const (
 	MessageBinary MessageType = 2
 )
 
-type Conn struct{}
+type Conn struct {
+	conn net.Conn
+	rw   *bufio.ReadWriter
+}
 
 // StatusCode represents a WebSocket status code.
 type StatusCode int

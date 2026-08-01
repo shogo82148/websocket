@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"errors"
 	"net/http"
 )
@@ -45,6 +47,65 @@ type AcceptOptions struct {
 	OnPongReceived func(ctx context.Context, payload []byte)
 }
 
+type rwUnwrap interface {
+	Unwrap() http.ResponseWriter
+}
+
+// hijacker returns the Hijacker interface of the http.ResponseWriter.
+// It looks for the Hijacker interface in a manner similar to http.ResponseController.
+// If it is not found, it returns (nil, false).
+//
+// Since there is no way to know in advance whether the Hijacker interface is implemented,
+// we implement it ourselves.
+func hijacker(w http.ResponseWriter) (http.Hijacker, bool) {
+	for {
+		switch hijacker := w.(type) {
+		case http.Hijacker:
+			return hijacker, true
+		case rwUnwrap:
+			w = hijacker.Unwrap()
+		default:
+			return nil, false
+		}
+	}
+}
+
+var errHijackerNotSupported = errors.New("websocket: hijacker is not supported")
+
 func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn, error) {
-	return nil, errors.New("not implemented")
+	// TODO: validate method, headers, and version
+	// TODO: validate origin
+
+	hijacker, ok := hijacker(w)
+	if !ok {
+		http.Error(w, http.StatusText(http.StatusNotImplemented), http.StatusNotImplemented)
+		return nil, errHijackerNotSupported
+	}
+
+	// Upgrade to WebSocket
+	key := r.Header.Get("Sec-WebSocket-Key")
+	h := w.Header()
+	h.Set("Upgrade", "websocket")
+	h.Set("Connection", "Upgrade")
+	h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+	w.WriteHeader(http.StatusSwitchingProtocols)
+
+	conn, rw, err := hijacker.Hijack()
+	if err != nil {
+		return nil, err
+	}
+	return &Conn{
+		conn: conn,
+		rw:   rw,
+	}, nil
+}
+
+var websocketGUID = []byte("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+
+func acceptHeader(key string) string {
+	hash := sha1.New()
+	buf := []byte(key)
+	hash.Write(buf)
+	hash.Write(websocketGUID)
+	return base64.StdEncoding.EncodeToString(hash.Sum(buf[:0]))
 }
