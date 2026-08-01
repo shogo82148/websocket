@@ -1,11 +1,13 @@
 package websocket
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"strings"
@@ -126,14 +128,21 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	h.Set("Sec-WebSocket-Accept", acceptHeader(key))
 	w.WriteHeader(http.StatusSwitchingProtocols)
 
-	conn, rw, err := hijacker.Hijack()
+	conn, brw, err := hijacker.Hijack()
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{
-		conn: conn,
-		rw:   rw,
-	}, nil
+
+	// https://github.com/golang/go/issues/32314
+	b, _ := brw.Reader.Peek(brw.Reader.Buffered())
+	brw.Reader.Reset(io.MultiReader(bytes.NewReader(b), conn))
+
+	return newConn(connConfig{
+		rwc:    conn,
+		client: false,
+		br:     brw.Reader,
+		bw:     brw.Writer,
+	}), nil
 }
 
 func headerContainsTokenIgnoreCase(h http.Header, key, token string) bool {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 )
 
 // MessageType represents the type of a WebSocket message.
@@ -21,8 +20,17 @@ const (
 )
 
 type Conn struct {
-	conn net.Conn
-	rw   *bufio.ReadWriter
+	rwc    io.ReadWriteCloser
+	client bool
+	br     *bufio.Reader
+	bw     *bufio.Writer
+}
+
+type connConfig struct {
+	rwc    io.ReadWriteCloser
+	client bool
+	br     *bufio.Reader
+	bw     *bufio.Writer
 }
 
 // StatusCode represents a WebSocket status code.
@@ -67,6 +75,15 @@ func CloseStatus(err error) StatusCode {
 		return ce.Code
 	}
 	return -1
+}
+
+func newConn(cfg connConfig) *Conn {
+	return &Conn{
+		rwc:    cfg.rwc,
+		client: cfg.client,
+		br:     cfg.br,
+		bw:     cfg.bw,
+	}
 }
 
 // Ping sends a ping to the peer and waits for a pong.
