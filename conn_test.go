@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"testing"
+	"time"
 )
 
 type nopReadWriteCloser struct {
@@ -383,6 +385,101 @@ func TestConnReadRejectsUnexpectedContinuation(t *testing.T) {
 	_, _, err := conn.Read(context.Background())
 	if err == nil || err.Error() != "websocket: unexpected continuation frame" {
 		t.Fatalf("Read error = %v, want unexpected continuation frame", err)
+	}
+}
+
+func TestConnPing(t *testing.T) {
+	t.Parallel()
+
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+
+	conn := newConn(connConfig{
+		rwc:    local,
+		client: false,
+		br:     bufio.NewReader(local),
+		bw:     bufio.NewWriter(local),
+	})
+
+	peerErrCh := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(remote)
+		writer := bufio.NewWriter(remote)
+		var buf [8]byte
+
+		header, pingPayload, err := readFrame(reader, buf[:])
+		if err != nil {
+			peerErrCh <- err
+			return
+		}
+		if header.opCode != opPing {
+			peerErrCh <- fmt.Errorf("peer saw opcode %v, want %v", header.opCode, opPing)
+			return
+		}
+		if header.mask {
+			peerErrCh <- errors.New("server ping must not be masked")
+			return
+		}
+
+		pong := encodeTestFrame(t, frameHeader{
+			fin:        true,
+			opCode:     opPong,
+			mask:       true,
+			maskKey:    0x01020304,
+			payloadLen: int64(len(pingPayload)),
+		}, pingPayload)
+		if _, err := writer.Write(pong); err != nil {
+			peerErrCh <- err
+			return
+		}
+
+		text := encodeTestFrame(t, frameHeader{
+			fin:        true,
+			opCode:     opText,
+			mask:       true,
+			maskKey:    0x05060708,
+			payloadLen: int64(len("next")),
+		}, []byte("next"))
+		if _, err := writer.Write(text); err != nil {
+			peerErrCh <- err
+			return
+		}
+		peerErrCh <- writer.Flush()
+	}()
+
+	readResultCh := make(chan struct {
+		messageType MessageType
+		payload     []byte
+		err         error
+	}, 1)
+	go func() {
+		messageType, payload, err := conn.Read(context.Background())
+		readResultCh <- struct {
+			messageType MessageType
+			payload     []byte
+			err         error
+		}{messageType: messageType, payload: payload, err: err}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := conn.Ping(ctx); err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+
+	if err := <-peerErrCh; err != nil {
+		t.Fatalf("peer failed: %v", err)
+	}
+	result := <-readResultCh
+	if result.err != nil {
+		t.Fatalf("Read failed: %v", result.err)
+	}
+	if result.messageType != MessageText {
+		t.Fatalf("Read messageType = %v, want %v", result.messageType, MessageText)
+	}
+	if string(result.payload) != "next" {
+		t.Fatalf("Read payload = %q, want %q", result.payload, "next")
 	}
 }
 

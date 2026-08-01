@@ -24,6 +24,9 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 }
 
 func (c *Conn) writeFrame(opCode opCode, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	header := frameHeader{
 		fin:        true,
 		opCode:     opCode,

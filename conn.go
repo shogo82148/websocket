@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
 
 // MessageType represents the type of a WebSocket message.
@@ -29,6 +31,15 @@ type Conn struct {
 
 	onPingReceived func(ctx context.Context, payload []byte) bool
 	onPongReceived func(ctx context.Context, payload []byte)
+
+	writeMu sync.Mutex
+	pongMu  sync.Mutex
+	pongAck *pongAck
+}
+
+type pongAck struct {
+	payload []byte
+	ch      chan []byte
 }
 
 type connConfig struct {
@@ -98,7 +109,42 @@ func newConn(cfg connConfig) *Conn {
 
 // Ping sends a ping to the peer and waits for a pong.
 func (c *Conn) Ping(ctx context.Context) error {
-	return errors.New("not implemented")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	payload := make([]byte, 8)
+	if _, err := rand.Read(payload); err != nil {
+		return err
+	}
+	ack := &pongAck{
+		payload: append([]byte(nil), payload...),
+		ch:      make(chan []byte, 1),
+	}
+
+	c.pongMu.Lock()
+	if c.pongAck != nil {
+		c.pongMu.Unlock()
+		return errors.New("websocket: concurrent ping not supported")
+	}
+	c.pongAck = ack
+	c.pongMu.Unlock()
+	defer c.clearPongAck(ack)
+
+	if err := c.writeFrame(opPing, payload); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case pongPayload := <-ack.ch:
+			if bytes.Equal(pongPayload, payload) {
+				return nil
+			}
+		}
+	}
 }
 
 // Reader reads from the connection until there is a WebSocket data message to be read.
@@ -166,10 +212,34 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 			if c.onPongReceived != nil {
 				c.onPongReceived(ctx, append([]byte(nil), framePayload...))
 			}
+			c.ackPong(framePayload)
 			continue
 		case opClose:
 			return 0, nil, parseClosePayload(framePayload)
 		}
+	}
+}
+
+func (c *Conn) ackPong(payload []byte) {
+	c.pongMu.Lock()
+	ack := c.pongAck
+	c.pongMu.Unlock()
+	if ack == nil {
+		return
+	}
+
+	pongPayload := append([]byte(nil), payload...)
+	select {
+	case ack.ch <- pongPayload:
+	default:
+	}
+}
+
+func (c *Conn) clearPongAck(ack *pongAck) {
+	c.pongMu.Lock()
+	defer c.pongMu.Unlock()
+	if c.pongAck == ack {
+		c.pongAck = nil
 	}
 }
 
