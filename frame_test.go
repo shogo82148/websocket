@@ -90,10 +90,10 @@ func TestWriteFrameHeader(t *testing.T) {
 
 func TestReadFrameHeader(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    []byte
-		expected frameHeader
-		wantErr  error
+		name        string
+		input       []byte
+		expected    frameHeader
+		wantErr     error
 		wantErrText string
 	}{
 		{
@@ -143,8 +143,8 @@ func TestReadFrameHeader(t *testing.T) {
 			wantErr: io.ErrUnexpectedEOF,
 		},
 		{
-			name:    "invalid negative payload length",
-			input:   []byte{0x81, 0x7F, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+			name:        "invalid negative payload length",
+			input:       []byte{0x81, 0x7F, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 			wantErrText: "websocket: invalid payload length",
 		},
 	}
