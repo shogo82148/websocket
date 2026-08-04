@@ -9,6 +9,7 @@ type messageReader struct {
 	conn       *Conn
 	fin        bool
 	payloadLen int64
+	mask       uint32
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
@@ -34,12 +35,16 @@ func (r *messageReader) Read(p []byte) (int, error) {
 	if r.payloadLen == 0 && r.fin {
 		return n, io.EOF
 	}
+	if !r.conn.client {
+		r.mask = maskFramePayload(p[:n], r.mask)
+	}
 	return n, nil
 }
 
 func (r *messageReader) setHeader(h frameHeader) {
 	r.fin = h.fin
 	r.payloadLen = h.payloadLen
+	r.mask = h.maskKey
 }
 
 // Reader reads from the connection until there is a WebSocket data message to be read.

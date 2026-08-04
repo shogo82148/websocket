@@ -20,6 +20,12 @@ func main() {
 			log.Println(err)
 			return
 		}
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		log.Printf("Received: %s", data)
 	})
 	http.ListenAndServe(":8080", nil)
 }
