@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"time"
+	"unicode/utf8"
 )
 
 // StatusCode represents a WebSocket status code.
@@ -59,18 +60,19 @@ func (err CloseError) Error() string {
 
 const maxCloseReason = maxControlPayload - 2
 
+var internalError = []byte{0x03, 0xF3} // StatusInternalError
+
 // bytes returns the byte representation of the CloseError, which can be sent as a close frame payload.
 func (err CloseError) bytes() ([]byte, error) {
 	if len(err.Reason) > maxCloseReason {
-		b := make([]byte, 2)
-		binary.BigEndian.PutUint16(b, uint16(StatusInternalError))
-		return b, fmt.Errorf("websocket: close reason too long: %d bytes (max %d)", len(err.Reason), maxCloseReason)
+		return internalError, fmt.Errorf("websocket: close reason too long: %d bytes (max %d)", len(err.Reason), maxCloseReason)
+	}
+	if !utf8.ValidString(err.Reason) {
+		return internalError, errors.New("websocket: close reason is not valid UTF-8")
 	}
 
 	if !validWireCloseCode(err.Code) {
-		b := make([]byte, 2)
-		binary.BigEndian.PutUint16(b, uint16(StatusInternalError))
-		return b, fmt.Errorf("websocket: invalid close code: %d", err.Code)
+		return internalError, fmt.Errorf("websocket: invalid close code: %d", err.Code)
 	}
 
 	b := make([]byte, 2+len(err.Reason))

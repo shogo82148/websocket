@@ -33,6 +33,15 @@ func TestCloseError(t *testing.T) {
 			success: false,
 		},
 		{
+			name: "invalid utf-8 reason",
+			ce: CloseError{
+				Code:   StatusNormalClosure,
+				Reason: string([]byte{0xff}),
+			},
+			want:    []byte{0x03, 0xF3}, // StatusInternalError
+			success: false,
+		},
+		{
 			name: "invalid close code",
 			ce: CloseError{
 				Code:   statusReserved,
