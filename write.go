@@ -100,7 +100,7 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 	if h.mask {
 		var maskKey [4]byte
 		rand.Read(maskKey[:])
-		h.maskKey = binary.NativeEndian.Uint32(maskKey[:])
+		h.maskKey = binary.BigEndian.Uint32(maskKey[:])
 		framePayload = append([]byte(nil), data...)
 		maskFramePayload(framePayload, h.maskKey)
 	}
