@@ -21,9 +21,6 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 	}
 	err := w.conn.writeFrame(w.ctx, false, w.opCode, p)
 	if err != nil {
-		if cerr := w.conn.canceledWrite(); cerr != nil {
-			return 0, cerr
-		}
 		return 0, err
 	}
 	w.opCode = opContinuation
@@ -36,12 +33,8 @@ func (w *messageWriter) Close() error {
 	}
 	w.closed = true
 	err := w.conn.writeFrame(w.ctx, true, w.opCode, nil)
-	w.conn.finishWrite()
 	w.conn.writerMu.unlock()
 	if err != nil {
-		if cerr := w.conn.canceledWrite(); cerr != nil {
-			return cerr
-		}
 		return err
 	}
 	return nil
@@ -64,12 +57,6 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 	}
 
 	if err := c.writerMu.lock(ctx); err != nil {
-		return nil, err
-	}
-
-	// watch for context cancellation and close the connection if the context is canceled.
-	if err := c.watchWriteCancel(ctx); err != nil {
-		c.writerMu.unlock()
 		return nil, err
 	}
 
@@ -99,9 +86,6 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 	defer c.writerMu.unlock()
 
 	if err := c.writeFrame(ctx, true, opCode, data); err != nil {
-		if cerr := c.canceledWrite(); cerr != nil {
-			return cerr
-		}
 		return err
 	}
 	return nil
@@ -136,13 +120,24 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 	}
 
 	if err := writeFrameHeader(c.bw, h); err != nil {
+		if cerr := c.canceledWrite(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 	if _, err := c.bw.Write(framePayload); err != nil {
+		if cerr := c.canceledWrite(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 	if fin {
-		return c.bw.Flush()
+		if err := c.bw.Flush(); err != nil {
+			if cerr := c.canceledWrite(); cerr != nil {
+				return cerr
+			}
+			return err
+		}
 	}
 	return nil
 }
