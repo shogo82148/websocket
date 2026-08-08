@@ -3,7 +3,6 @@ package websocket
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"testing"
@@ -25,11 +24,16 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 }
 
 func TestConnReader(t *testing.T) {
+	t.Parallel()
+
 	t.Run("reads text message", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -47,10 +51,13 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("reads binary message", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		frame := []byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -68,19 +75,25 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("returns EOF when no frame is available", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		conn := newTestConnWithInput(t, nil)
 
-		_, _, err := conn.Reader(context.Background())
+		_, _, err := conn.Reader(ctx)
 		if !errors.Is(err, io.EOF) {
 			t.Fatalf("Reader error = %v; want %v", err, io.EOF)
 		}
 	})
 
 	t.Run("reader returns EOF on final chunk", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
-		_, r, err := conn.Reader(context.Background())
+		_, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -112,10 +125,13 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("zero-byte final frame returns EOF immediately", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		frame := []byte{0x81, 0x00}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -134,9 +150,12 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("reads masked payload across multiple reads", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}
 		conn := newTestConnWithInput(t, frame)
-		_, r, err := conn.Reader(context.Background())
+		_, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
