@@ -156,4 +156,38 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Read n = %d; want 0", n)
 		}
 	})
+
+	t.Run("reads masked payload across multiple reads", func(t *testing.T) {
+		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
+		conn := newTestConnWithInput(t, frame)
+		_, r, err := conn.Reader(context.Background())
+		if err != nil {
+			t.Fatalf("Reader failed: %v", err)
+		}
+
+		buf2 := make([]byte, 2)
+		n, err := r.Read(buf2)
+		if err != nil {
+			t.Fatalf("first Read error = %v; want nil", err)
+		}
+		if n != 2 || string(buf2[:n]) != "he" {
+			t.Fatalf("first Read = (%d, %q); want (2, %q)", n, buf2[:n], "he")
+		}
+
+		n, err = r.Read(buf2)
+		if err != nil {
+			t.Fatalf("second Read error = %v; want nil", err)
+		}
+		if n != 2 || string(buf2[:n]) != "ll" {
+			t.Fatalf("second Read = (%d, %q); want (2, %q)", n, buf2[:n], "ll")
+		}
+
+		n, err = r.Read(buf2)
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("third Read error = %v; want %v", err, io.EOF)
+		}
+		if n != 1 || string(buf2[:n]) != "o" {
+			t.Fatalf("third Read = (%d, %q); want (1, %q)", n, buf2[:n], "o")
+		}
+	})
 }
