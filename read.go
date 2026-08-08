@@ -29,14 +29,14 @@ func (r *messageReader) Read(p []byte) (int, error) {
 	}
 	n, err := r.conn.br.Read(p)
 	r.payloadLen -= int64(n)
+	if !r.conn.client {
+		r.mask = maskFramePayload(p[:n], r.mask)
+	}
 	if err != nil {
 		return n, err
 	}
 	if r.payloadLen == 0 && r.fin {
 		return n, io.EOF
-	}
-	if !r.conn.client {
-		r.mask = maskFramePayload(p[:n], r.mask)
 	}
 	return n, nil
 }
