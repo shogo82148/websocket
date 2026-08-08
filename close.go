@@ -217,7 +217,7 @@ func (c *Conn) waitCloseHandshake(ctx context.Context) error {
 }
 
 // close closes the underlying connection and unblocks all goroutines interacting with the connection.
-func (c *Conn) close() error {
+func (c *conn) close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 

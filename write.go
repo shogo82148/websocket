@@ -34,7 +34,10 @@ func (w *messageWriter) Close() error {
 	w.closed = true
 	err := w.conn.writeFrame(w.ctx, true, w.opCode, nil)
 	w.conn.writerMu.unlock()
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
@@ -56,6 +59,7 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 	if err := c.writerMu.lock(ctx); err != nil {
 		return nil, err
 	}
+
 	return &messageWriter{
 		ctx:    ctx,
 		conn:   c,
@@ -75,12 +79,16 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 		return fmt.Errorf("websocket: invalid message type: %s", messageType)
 	}
 
+	// Acquire the writer lock to ensure that only one writer is active at a time.
 	if err := c.writerMu.lock(ctx); err != nil {
 		return err
 	}
 	defer c.writerMu.unlock()
 
-	return c.writeFrame(ctx, true, opCode, data)
+	if err := c.writeFrame(ctx, true, opCode, data); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []byte) error {
@@ -88,6 +96,12 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 		return err
 	}
 	defer c.writeFrameMu.unlock()
+
+	// watch for context cancellation and close the connection if the context is canceled.
+	if err := c.watchWriteCancel(ctx); err != nil {
+		return err
+	}
+	defer c.finishWrite()
 
 	h := frameHeader{
 		fin:        fin,
@@ -106,10 +120,24 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 	}
 
 	if err := writeFrameHeader(c.bw, h); err != nil {
+		if cerr := c.canceledWrite(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 	if _, err := c.bw.Write(framePayload); err != nil {
+		if cerr := c.canceledWrite(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
-	return c.bw.Flush()
+	if fin {
+		if err := c.bw.Flush(); err != nil {
+			if cerr := c.canceledWrite(); cerr != nil {
+				return cerr
+			}
+			return err
+		}
+	}
+	return nil
 }

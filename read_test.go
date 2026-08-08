@@ -3,10 +3,32 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net"
 	"testing"
+	"time"
 )
+
+type blockedReadWriteCloser struct {
+	closed chan struct{}
+}
+
+func (r *blockedReadWriteCloser) Read(p []byte) (int, error) {
+	<-r.closed
+	return 0, net.ErrClosed
+}
+
+func (r *blockedReadWriteCloser) Write(p []byte) (int, error) {
+	<-r.closed
+	return 0, net.ErrClosed
+}
+
+func (r *blockedReadWriteCloser) Close() error {
+	close(r.closed)
+	return nil
+}
 
 func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 	t.Helper()
@@ -183,6 +205,26 @@ func TestConnReader(t *testing.T) {
 		}
 		if n != 1 || string(buf2[:n]) != "o" {
 			t.Fatalf("third Read = (%d, %q); want (1, %q)", n, buf2[:n], "o")
+		}
+	})
+
+	t.Run("timeout while reading frame header returns context error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		_, _, err := conn.Reader(ctx)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Reader error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -34,14 +35,33 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	*conn
+}
+
+type conn struct {
 	_ noCopy
 
-	rwc          io.ReadWriteCloser
-	client       bool
-	br           *bufio.Reader
-	bw           *bufio.Writer
-	writeFrameMu *mutex
+	rwc    io.ReadWriteCloser
+	client bool
+	br     *bufio.Reader
+	bw     *bufio.Writer
+
+	// for synchronizing reads
+	readerMu *mutex
+
+	// for synchronizing writes
 	writerMu     *mutex
+	writeFrameMu *mutex
+
+	// for handling context cancellation
+	readWatcher      chan<- context.Context
+	readFinished     chan<- struct{}
+	readCanceledMu   sync.Mutex
+	readCanceledErr  error
+	writeWatcher     chan<- context.Context
+	writeFinished    chan<- struct{}
+	writeCanceledMu  sync.Mutex
+	writeCanceledErr error
 
 	// closing TCP connection state
 	closing atomic.Bool
@@ -58,16 +78,24 @@ type connConfig struct {
 
 func newConn(cfg connConfig) *Conn {
 	closed := make(chan struct{})
-	conn := &Conn{
-		rwc:          cfg.rwc,
-		client:       cfg.client,
-		br:           cfg.br,
-		bw:           cfg.bw,
-		writeFrameMu: newMutex(closed),
-		writerMu:     newMutex(closed),
-		closed:       closed,
+	c := &Conn{
+		conn: &conn{
+			rwc:          cfg.rwc,
+			client:       cfg.client,
+			br:           cfg.br,
+			bw:           cfg.bw,
+			readerMu:     newMutex(closed),
+			writerMu:     newMutex(closed),
+			writeFrameMu: newMutex(closed),
+			closed:       closed,
+		},
 	}
-	return conn
+	runtime.AddCleanup(c, func(c *conn) {
+		_ = c.close()
+	}, c.conn)
+	c.startReadWatcher()
+	c.startWriteWatcher()
+	return c
 }
 
 // Ping sends a ping to the peer and waits for a pong.
@@ -91,6 +119,144 @@ func (c *Conn) SetReadLimit(limit int64) {
 // An empty string means the default protocol.
 func (c *Conn) Subprotocol() string {
 	return ""
+}
+
+func (c *conn) startReadWatcher() {
+	watcher := make(chan context.Context, 1)
+	c.readWatcher = watcher
+
+	finished := make(chan struct{})
+	c.readFinished = finished
+
+	closed := c.closed
+
+	// watcher goroutine
+	go func() {
+		for {
+			var ctx context.Context
+			select {
+			case ctx = <-watcher:
+			case <-closed:
+				// connection closed, exit goroutine
+				return
+			}
+
+			// wait for context cancellation
+			select {
+			case <-ctx.Done():
+				c.cancelRead(ctx.Err())
+			case <-finished:
+			case <-closed:
+				// connection closed, exit goroutine
+				return
+			}
+		}
+	}()
+}
+
+// watchReadCancel watches the context for cancellation and cancels the connection if the context is canceled.
+func (c *conn) watchReadCancel(ctx context.Context) error {
+	// check if the connection is already closed
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	c.readWatcher <- ctx
+	return nil
+}
+
+func (c *conn) finishRead() {
+	select {
+	case c.readFinished <- struct{}{}:
+	case <-c.closed:
+	}
+}
+
+// cancelRead cancels the connection and unblocks all goroutines interacting with the connection.
+func (c *conn) cancelRead(err error) {
+	c.readCanceledMu.Lock()
+	c.readCanceledErr = err
+	c.readCanceledMu.Unlock()
+
+	c.close()
+}
+
+// canceledRead returns the error that caused the connection to be canceledRead, or nil if the connection was not canceledRead.
+func (c *conn) canceledRead() error {
+	c.readCanceledMu.Lock()
+	defer c.readCanceledMu.Unlock()
+	return c.readCanceledErr
+}
+
+func (c *conn) startWriteWatcher() {
+	watcher := make(chan context.Context, 1)
+	c.writeWatcher = watcher
+
+	finished := make(chan struct{})
+	c.writeFinished = finished
+
+	closed := c.closed
+
+	// watcher goroutine
+	go func() {
+		for {
+			var ctx context.Context
+			select {
+			case ctx = <-watcher:
+			case <-closed:
+				// connection closed, exit goroutine
+				return
+			}
+
+			// wait for context cancellation
+			select {
+			case <-ctx.Done():
+				c.cancelWrite(ctx.Err())
+			case <-finished:
+			case <-closed:
+				// connection closed, exit goroutine
+				return
+			}
+		}
+	}()
+}
+
+// watchWriteCancel watches the context for cancellation and cancels the connection if the context is canceled.
+func (c *conn) watchWriteCancel(ctx context.Context) error {
+	// check if the connection is already closed
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	c.writeWatcher <- ctx
+	return nil
+}
+
+func (c *conn) finishWrite() {
+	select {
+	case c.writeFinished <- struct{}{}:
+	case <-c.closed:
+	}
+}
+
+// cancelWrite cancels the connection and unblocks all goroutines interacting with the connection.
+func (c *conn) cancelWrite(err error) {
+	c.writeCanceledMu.Lock()
+	c.writeCanceledErr = err
+	c.writeCanceledMu.Unlock()
+
+	c.close()
+}
+
+// canceledWrite returns the error that caused the connection to be canceledWrite, or nil if the connection was not canceledWrite.
+func (c *conn) canceledWrite() error {
+	c.writeCanceledMu.Lock()
+	defer c.writeCanceledMu.Unlock()
+	return c.writeCanceledErr
 }
 
 // mutex is a mutex that can be locked and unlocked with a context.Context.
@@ -119,6 +285,9 @@ func (m *mutex) lock(ctx context.Context) error {
 		case <-m.closed:
 			<-m.ch // unlock
 			return net.ErrClosed
+		case <-ctx.Done():
+			<-m.ch // unlock
+			return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
 		default:
 			return nil
 		}

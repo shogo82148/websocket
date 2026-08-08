@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type testReadWriteCloser struct {
@@ -122,10 +123,41 @@ func TestConnWriter(t *testing.T) {
 			t.Fatalf("second Close failed: %v", err)
 		}
 	})
+
+	t.Run("timeout while writing frame header returns context error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		w, err := conn.Writer(ctx, MessageText)
+		if err != nil {
+			t.Fatalf("Writer failed: %v", err)
+		}
+
+		if _, err := w.Write([]byte("hello")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		if err := w.Close(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
 }
 
 func TestConnWrite(t *testing.T) {
+	t.Parallel()
+
 	t.Run("writes a single final text frame", func(t *testing.T) {
+		t.Parallel()
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
 			rwc: rwc,
@@ -144,6 +176,7 @@ func TestConnWrite(t *testing.T) {
 	})
 
 	t.Run("rejects invalid message type", func(t *testing.T) {
+		t.Parallel()
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
 			rwc: rwc,
@@ -158,6 +191,7 @@ func TestConnWrite(t *testing.T) {
 	})
 
 	t.Run("respects writer lock context cancellation", func(t *testing.T) {
+		t.Parallel()
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
 			rwc: rwc,
@@ -188,6 +222,26 @@ func TestConnWrite(t *testing.T) {
 		expected := []byte{0x81, 0x00, 0x82, 0x02, 0x01, 0x02}
 		if got := rwc.Bytes(); !bytes.Equal(got, expected) {
 			t.Fatalf("unexpected frame bytes: got %v, want %v", got, expected)
+		}
+	})
+
+	t.Run("timeout while writing frame header returns context error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		err := conn.Write(ctx, MessageText, []byte("hello"))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Write error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
 }

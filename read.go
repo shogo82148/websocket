@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 )
 
 type messageReader struct {
@@ -13,20 +14,32 @@ type messageReader struct {
 	fin        bool
 	payloadLen int64
 	mask       uint32
+	closed     bool
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
+	if r.closed {
+		return 0, net.ErrClosed
+	}
 	if r.payloadLen <= 0 {
 		if r.fin {
+			r.close()
 			return 0, io.EOF
 		}
+
+		// Read the next frame header.
 		h, err := r.conn.readLoop(r.ctx)
 		if err != nil {
+			r.close()
+			if cerr := r.conn.canceledRead(); cerr != nil {
+				return 0, cerr
+			}
 			return 0, err
 		}
 		r.setHeader(h)
 		r.payloadLen = h.payloadLen
 	}
+
 	if int64(len(p)) > r.payloadLen {
 		p = p[:r.payloadLen]
 	}
@@ -36,9 +49,15 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		r.mask = maskFramePayload(p[:n], r.mask)
 	}
 	if err != nil {
+		r.close()
+		if cerr := r.conn.canceledRead(); cerr != nil {
+			return 0, cerr
+		}
 		return n, err
 	}
+
 	if r.payloadLen == 0 && r.fin {
+		r.close()
 		return n, io.EOF
 	}
 	return n, nil
@@ -50,11 +69,35 @@ func (r *messageReader) setHeader(h frameHeader) {
 	r.mask = h.maskKey
 }
 
+func (r *messageReader) close() error {
+	if r.closed {
+		return net.ErrClosed
+	}
+	r.closed = true
+	r.conn.finishRead()
+	r.conn.readerMu.unlock()
+	return nil
+}
+
 // Reader reads from the connection until there is a WebSocket data message to be read.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
+	if err := c.readerMu.lock(ctx); err != nil {
+		return 0, nil, err
+	}
+
+	if err := c.watchReadCancel(ctx); err != nil {
+		c.readerMu.unlock()
+		return 0, nil, err
+	}
+
 	h, err := c.readLoop(ctx)
 	if err != nil {
+		c.finishRead()
+		c.readerMu.unlock()
+		if cerr := c.canceledRead(); cerr != nil {
+			return 0, nil, cerr
+		}
 		return 0, nil, err
 	}
 	r := &messageReader{
