@@ -24,32 +24,9 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 	})
 }
 
-func buildFrameForTest(t *testing.T, fin bool, code opCode, payload []byte) []byte {
-	t.Helper()
-
-	buf := new(bytes.Buffer)
-	bw := bufio.NewWriter(buf)
-	header := frameHeader{
-		fin:        fin,
-		opCode:     code,
-		mask:       false,
-		payloadLen: int64(len(payload)),
-	}
-	if err := writeFrameHeader(bw, header); err != nil {
-		t.Fatalf("writeFrameHeader failed: %v", err)
-	}
-	if _, err := bw.Write(payload); err != nil {
-		t.Fatalf("failed to write payload: %v", err)
-	}
-	if err := bw.Flush(); err != nil {
-		t.Fatalf("failed to flush payload: %v", err)
-	}
-	return buf.Bytes()
-}
-
 func TestConnReader(t *testing.T) {
 	t.Run("reads text message", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, []byte("hello"))
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(context.Background())
@@ -70,8 +47,7 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("reads binary message", func(t *testing.T) {
-		payload := []byte{0x01, 0x02, 0x03, 0x04}
-		frame := buildFrameForTest(t, true, opBinary, payload)
+		frame := []byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}
 		conn := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(context.Background())
@@ -86,8 +62,8 @@ func TestConnReader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadAll failed: %v", err)
 		}
-		if !bytes.Equal(got, payload) {
-			t.Fatalf("payload = %v; want %v", got, payload)
+		if !bytes.Equal(got, []byte{0x01, 0x02, 0x03, 0x04}) {
+			t.Fatalf("payload = %v; want %v", got, []byte{0x01, 0x02, 0x03, 0x04})
 		}
 	})
 
@@ -101,7 +77,7 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("reader returns EOF on final chunk", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, []byte("hello"))
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
 		_, r, err := conn.Reader(context.Background())
@@ -136,7 +112,7 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("zero-byte final frame returns EOF immediately", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, nil)
+		frame := []byte{0x81, 0x00}
 		conn := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(context.Background())
