@@ -2,8 +2,10 @@ package websocket
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -90,4 +92,50 @@ func TestConnCleanupClosesUnderlyingConnection(t *testing.T) {
 		runtime.GC()
 		runtime.Gosched()
 	}
+}
+
+func TestMutex(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lock and unlock", func(t *testing.T) {
+		ctx := t.Context()
+		closed := make(chan struct{})
+		m := newMutex(closed)
+
+		if err := m.lock(ctx); err != nil {
+			t.Fatalf("first lock failed: %v", err)
+		}
+		m.unlock()
+
+		if err := m.lock(ctx); err != nil {
+			t.Fatalf("second lock failed: %v", err)
+		}
+		m.unlock()
+	})
+
+	t.Run("returns context error when canceled", func(t *testing.T) {
+		ctx := t.Context()
+		closed := make(chan struct{})
+		m := newMutex(closed)
+
+		ctx, cancel := context.WithCancel(ctx)
+		cancel()
+
+		err := m.lock(ctx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("lock error = %v; want wrapping %v", err, context.Canceled)
+		}
+	})
+
+	t.Run("returns ErrClosed when closed", func(t *testing.T) {
+		ctx := t.Context()
+		closed := make(chan struct{})
+		close(closed)
+		m := newMutex(closed)
+
+		err := m.lock(ctx)
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("lock error = %v; want %v", err, net.ErrClosed)
+		}
+	})
 }
