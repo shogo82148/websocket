@@ -201,7 +201,13 @@ func websocketExtensions(h http.Header) iter.Seq[websocketExtension] {
 }
 
 func selectDeflate(selectDeflate iter.Seq[websocketExtension], mode CompressionMode) (*compressionOptions, bool) {
-	if mode == CompressionDisabled {
+	switch mode {
+	case CompressionDisabled:
+		return nil, false
+	case CompressionContextTakeover:
+	case CompressionNoContextTakeover:
+	default:
+		// This should never happen, but if it does, we will treat it as CompressionDisabled.
 		return nil, false
 	}
 
