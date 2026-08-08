@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -67,6 +68,9 @@ func newConn(cfg connConfig) *Conn {
 		writerMu:     newMutex(closed),
 		closed:       closed,
 	}
+	runtime.AddCleanup(conn, func(rwc io.ReadWriteCloser) {
+		rwc.Close()
+	}, cfg.rwc)
 	return conn
 }
 
