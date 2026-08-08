@@ -146,6 +146,10 @@ func validWireCloseCode(code StatusCode) bool {
 // Close will unblock all goroutines interacting with the connection once
 // complete.
 func (c *Conn) Close(code StatusCode, reason string) error {
+	if !c.closing.CompareAndSwap(false, true) {
+		return net.ErrClosed
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -158,6 +162,10 @@ func (c *Conn) Close(code StatusCode, reason string) error {
 // CloseNow closes the WebSocket connection without attempting a close handshake.
 // Use when you do not want the overhead of the close handshake.
 func (c *Conn) CloseNow() error {
+	if !c.closing.CompareAndSwap(false, true) {
+		return net.ErrClosed
+	}
+
 	return c.close()
 }
 
