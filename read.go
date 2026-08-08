@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 )
 
 type messageReader struct {
@@ -13,9 +14,13 @@ type messageReader struct {
 	fin        bool
 	payloadLen int64
 	mask       uint32
+	closed     bool
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
+	if r.closed {
+		return 0, net.ErrClosed
+	}
 	if r.payloadLen <= 0 {
 		if r.fin {
 			r.close()
@@ -63,6 +68,10 @@ func (r *messageReader) setHeader(h frameHeader) {
 }
 
 func (r *messageReader) close() error {
+	if r.closed {
+		return net.ErrClosed
+	}
+	r.closed = true
 	r.conn.finishRead()
 	r.conn.readerMu.unlock()
 	return nil
