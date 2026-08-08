@@ -144,7 +144,7 @@ func (c *conn) startReadWatcher() {
 			// wait for context cancellation
 			select {
 			case <-ctx.Done():
-				c.cancelWrite(ctx.Err())
+				c.cancelRead(ctx.Err())
 			case <-finished:
 			case <-closed:
 				// connection closed, exit goroutine

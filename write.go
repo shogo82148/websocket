@@ -141,5 +141,8 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 	if _, err := c.bw.Write(framePayload); err != nil {
 		return err
 	}
-	return c.bw.Flush()
+	if fin {
+		return c.bw.Flush()
+	}
+	return nil
 }

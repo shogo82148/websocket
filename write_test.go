@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type testReadWriteCloser struct {
@@ -120,6 +121,34 @@ func TestConnWriter(t *testing.T) {
 		}
 		if err := second.Close(); err != nil {
 			t.Fatalf("second Close failed: %v", err)
+		}
+	})
+
+	t.Run("timeout while writing frame header returns context error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		w, err := conn.Writer(ctx, MessageText)
+		if err != nil {
+			t.Fatalf("Writer failed: %v", err)
+		}
+
+		if _, err := w.Write([]byte("hello")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		if err := w.Close(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
 }
