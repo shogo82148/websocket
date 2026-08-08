@@ -60,7 +60,12 @@ func (err CloseError) Error() string {
 
 const maxCloseReason = maxControlPayload - 2
 
-var internalError = []byte{0x03, 0xF3} // StatusInternalError
+var internalError []byte
+
+func init() {
+	internalError = make([]byte, 2)
+	binary.BigEndian.PutUint16(internalError, uint16(StatusInternalError))
+}
 
 // bytes returns the byte representation of the CloseError, which can be sent as a close frame payload.
 func (err CloseError) bytes() ([]byte, error) {
