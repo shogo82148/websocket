@@ -32,8 +32,8 @@ type frameHeader struct {
 
 func maskFramePayload(payload []byte, key uint32) uint32 {
 	for i := range payload {
-		payload[i] ^= byte(key >> 24)
-		key = bits.RotateLeft32(key, 8)
+		payload[i] ^= byte(key)
+		key = bits.RotateLeft32(key, -8)
 	}
 	return key
 }
@@ -87,7 +87,7 @@ func readFrameHeader(br *bufio.Reader) (frameHeader, error) {
 		if _, err := io.ReadFull(br, buf[:]); err != nil {
 			return h, err
 		}
-		h.maskKey = binary.BigEndian.Uint32(buf[:])
+		h.maskKey = binary.LittleEndian.Uint32(buf[:])
 	}
 
 	return h, nil
@@ -147,7 +147,7 @@ func writeFrameHeader(bw *bufio.Writer, h frameHeader) error {
 
 	// Write the mask key if necessary.
 	if h.mask {
-		binary.BigEndian.PutUint32(buf[:4], h.maskKey)
+		binary.LittleEndian.PutUint32(buf[:4], h.maskKey)
 		if _, err := bw.Write(buf[:4]); err != nil {
 			return err
 		}
