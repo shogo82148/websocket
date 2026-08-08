@@ -26,6 +26,11 @@ func main() {
 			return
 		}
 		log.Printf("Received: %s", data)
+
+		if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+			log.Println(err)
+			return
+		}
 	})
 	http.ListenAndServe(":8080", nil)
 }
