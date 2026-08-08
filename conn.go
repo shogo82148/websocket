@@ -44,6 +44,12 @@ type Conn struct {
 	writeFrameMu *mutex
 	writerMu     *mutex
 
+	// for handling context cancellation
+	watcher     chan<- context.Context
+	finished    chan<- struct{}
+	canceledMu  sync.Mutex
+	canceledErr error
+
 	// closing TCP connection state
 	closing atomic.Bool
 	closeMu sync.Mutex
@@ -71,6 +77,7 @@ func newConn(cfg connConfig) *Conn {
 	runtime.AddCleanup(conn, func(rwc io.ReadWriteCloser) {
 		rwc.Close()
 	}, cfg.rwc)
+	conn.startWatcher()
 	return conn
 }
 
@@ -95,6 +102,73 @@ func (c *Conn) SetReadLimit(limit int64) {
 // An empty string means the default protocol.
 func (c *Conn) Subprotocol() string {
 	return ""
+}
+
+func (c *Conn) startWatcher() {
+	watcher := make(chan context.Context, 1)
+	c.watcher = watcher
+
+	finished := make(chan struct{})
+	c.finished = finished
+
+	// watcher goroutine
+	go func() {
+		for {
+			var ctx context.Context
+			select {
+			case ctx = <-watcher:
+			case <-c.closed:
+				// connection closed, exit goroutine
+				return
+			}
+
+			// wait for context cancellation
+			select {
+			case <-ctx.Done():
+				c.cancel(ctx.Err())
+			case <-finished:
+			case <-c.closed:
+				// connection closed, exit goroutine
+				return
+			}
+		}
+	}()
+}
+
+// watchCancel watches the context for cancellation and cancels the connection if the context is canceled.
+func (c *Conn) watchCancel(ctx context.Context) error {
+	// check if the connection is already closed
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	c.watcher <- ctx
+	return nil
+}
+
+func (c *Conn) finish() {
+	select {
+	case c.finished <- struct{}{}:
+	case <-c.closed:
+	}
+}
+
+// cancel cancels the connection and unblocks all goroutines interacting with the connection.
+func (c *Conn) cancel(err error) {
+	c.canceledMu.Lock()
+	c.canceledErr = err
+	c.canceledMu.Unlock()
+
+	c.close()
+}
+
+// canceled returns the error that caused the connection to be canceled, or nil if the connection was not canceled.
+func (c *Conn) canceled() error {
+	c.canceledMu.Lock()
+	defer c.canceledMu.Unlock()
+	return c.canceledErr
 }
 
 // mutex is a mutex that can be locked and unlocked with a context.Context.
