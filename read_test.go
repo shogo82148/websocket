@@ -3,7 +3,6 @@ package websocket
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"testing"
@@ -24,35 +23,17 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 	})
 }
 
-func buildFrameForTest(t *testing.T, fin bool, code opCode, payload []byte) []byte {
-	t.Helper()
-
-	buf := new(bytes.Buffer)
-	bw := bufio.NewWriter(buf)
-	header := frameHeader{
-		fin:        fin,
-		opCode:     code,
-		mask:       false,
-		payloadLen: int64(len(payload)),
-	}
-	if err := writeFrameHeader(bw, header); err != nil {
-		t.Fatalf("writeFrameHeader failed: %v", err)
-	}
-	if _, err := bw.Write(payload); err != nil {
-		t.Fatalf("failed to write payload: %v", err)
-	}
-	if err := bw.Flush(); err != nil {
-		t.Fatalf("failed to flush payload: %v", err)
-	}
-	return buf.Bytes()
-}
-
 func TestConnReader(t *testing.T) {
+	t.Parallel()
+
 	t.Run("reads text message", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, []byte("hello"))
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -70,11 +51,13 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("reads binary message", func(t *testing.T) {
-		payload := []byte{0x01, 0x02, 0x03, 0x04}
-		frame := buildFrameForTest(t, true, opBinary, payload)
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -86,25 +69,31 @@ func TestConnReader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadAll failed: %v", err)
 		}
-		if !bytes.Equal(got, payload) {
-			t.Fatalf("payload = %v; want %v", got, payload)
+		if !bytes.Equal(got, []byte{0x01, 0x02, 0x03, 0x04}) {
+			t.Fatalf("payload = %v; want %v", got, []byte{0x01, 0x02, 0x03, 0x04})
 		}
 	})
 
 	t.Run("returns EOF when no frame is available", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
 		conn := newTestConnWithInput(t, nil)
 
-		_, _, err := conn.Reader(context.Background())
+		_, _, err := conn.Reader(ctx)
 		if !errors.Is(err, io.EOF) {
 			t.Fatalf("Reader error = %v; want %v", err, io.EOF)
 		}
 	})
 
 	t.Run("reader returns EOF on final chunk", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, []byte("hello"))
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 		conn := newTestConnWithInput(t, frame)
 
-		_, r, err := conn.Reader(context.Background())
+		_, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -136,10 +125,13 @@ func TestConnReader(t *testing.T) {
 	})
 
 	t.Run("zero-byte final frame returns EOF immediately", func(t *testing.T) {
-		frame := buildFrameForTest(t, true, opText, nil)
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x00}
 		conn := newTestConnWithInput(t, frame)
 
-		typ, r, err := conn.Reader(context.Background())
+		typ, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
 		}
@@ -154,6 +146,43 @@ func TestConnReader(t *testing.T) {
 		}
 		if n != 0 {
 			t.Fatalf("Read n = %d; want 0", n)
+		}
+	})
+
+	t.Run("reads masked payload across multiple reads", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}
+		conn := newTestConnWithInput(t, frame)
+		_, r, err := conn.Reader(ctx)
+		if err != nil {
+			t.Fatalf("Reader failed: %v", err)
+		}
+
+		buf2 := make([]byte, 2)
+		n, err := r.Read(buf2)
+		if err != nil {
+			t.Fatalf("first Read error = %v; want nil", err)
+		}
+		if n != 2 || string(buf2[:n]) != "he" {
+			t.Fatalf("first Read = (%d, %q); want (2, %q)", n, buf2[:n], "he")
+		}
+
+		n, err = r.Read(buf2)
+		if err != nil {
+			t.Fatalf("second Read error = %v; want nil", err)
+		}
+		if n != 2 || string(buf2[:n]) != "ll" {
+			t.Fatalf("second Read = (%d, %q); want (2, %q)", n, buf2[:n], "ll")
+		}
+
+		n, err = r.Read(buf2)
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("third Read error = %v; want %v", err, io.EOF)
+		}
+		if n != 1 || string(buf2[:n]) != "o" {
+			t.Fatalf("third Read = (%d, %q); want (1, %q)", n, buf2[:n], "o")
 		}
 	})
 }
