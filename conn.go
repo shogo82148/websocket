@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 )
@@ -60,8 +61,8 @@ func newConn(cfg connConfig) *Conn {
 		client:       cfg.client,
 		br:           cfg.br,
 		bw:           cfg.bw,
-		writeFrameMu: newMutex(),
-		writerMu:     newMutex(),
+		writeFrameMu: newMutex(closed),
+		writerMu:     newMutex(closed),
 		closed:       closed,
 	}
 	return conn
@@ -92,22 +93,33 @@ func (c *Conn) Subprotocol() string {
 
 // mutex is a mutex that can be locked and unlocked with a context.Context.
 type mutex struct {
-	_  noCopy
-	ch chan struct{}
+	_      noCopy
+	ch     chan struct{}
+	closed <-chan struct{}
 }
 
-func newMutex() *mutex {
+func newMutex(closed <-chan struct{}) *mutex {
 	return &mutex{
-		ch: make(chan struct{}, 1),
+		ch:     make(chan struct{}, 1),
+		closed: closed,
 	}
 }
 
 func (m *mutex) lock(ctx context.Context) error {
 	select {
+	case <-m.closed:
+		return net.ErrClosed
 	case <-ctx.Done():
 		return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
 	case m.ch <- struct{}{}:
-		return nil
+		// To make sure the connection is certainly alive.
+		select {
+		case <-m.closed:
+			<-m.ch // unlock
+			return net.ErrClosed
+		default:
+			return nil
+		}
 	}
 }
 
