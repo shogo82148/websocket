@@ -2,10 +2,13 @@ package websocket
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 )
 
 type messageReader struct {
+	ctx        context.Context
 	conn       *Conn
 	fin        bool
 	payloadLen int64
@@ -17,7 +20,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		if r.fin {
 			return 0, io.EOF
 		}
-		h, err := r.conn.readLoop()
+		h, err := r.conn.readLoop(r.ctx)
 		if err != nil {
 			return 0, err
 		}
@@ -50,11 +53,12 @@ func (r *messageReader) setHeader(h frameHeader) {
 // Reader reads from the connection until there is a WebSocket data message to be read.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
-	h, err := c.readLoop()
+	h, err := c.readLoop(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
 	r := &messageReader{
+		ctx:  ctx,
 		conn: c,
 	}
 	r.setHeader(h)
@@ -93,7 +97,7 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (c *Conn) readLoop() (frameHeader, error) {
+func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 	for {
 		h, err := readFrameHeader(c.br)
 		if err != nil {
@@ -104,13 +108,51 @@ func (c *Conn) readLoop() (frameHeader, error) {
 
 		switch h.opCode {
 		case opClose, opPing, opPong:
-			// TODO: handle control frames
-		case opText, opBinary:
+			if err := c.handleControlFrame(ctx, h); err != nil {
+				return frameHeader{}, err
+			}
+		case opContinuation, opText, opBinary:
 			return h, nil
-		case opContinuation:
-			// TODO: error handling
 		default:
-			// TODO: handle invalid opcode
+			c.writeClose(ctx, StatusProtocolError, "received unknown opcode")
+			return frameHeader{}, fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
 		}
 	}
+}
+
+func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
+	// validate control frame
+	if h.payloadLen < 0 || h.payloadLen > maxControlPayload {
+		c.writeClose(ctx, StatusProtocolError, "control frame payload length is invalid")
+		return fmt.Errorf("websocket: control frame payload length is invalid: %d", h.payloadLen)
+	}
+	if !h.fin {
+		c.writeClose(ctx, StatusProtocolError, "control frame is fragmented")
+		return errors.New("websocket: control frame is fragmented")
+	}
+
+	buf := make([]byte, h.payloadLen)
+	if _, err := io.ReadFull(c.br, buf); err != nil {
+		return err
+	}
+	if h.mask {
+		maskFramePayload(buf, h.maskKey)
+	}
+
+	switch h.opCode {
+	case opClose:
+		ce, err := parseClosePayload(buf)
+		if err != nil {
+			c.writeClose(ctx, StatusProtocolError, "received invalid close payload")
+			return err
+		}
+		return ce
+	case opPing:
+		return c.writeFrame(ctx, true, opPong, buf)
+	case opPong:
+	default:
+		c.writeClose(ctx, StatusProtocolError, "received unknown opcode")
+		return fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
+	}
+	return nil
 }

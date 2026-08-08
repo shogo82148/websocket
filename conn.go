@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"sync"
+	"sync/atomic"
 )
 
 // MessageType represents the type of a WebSocket message.
@@ -31,12 +34,19 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	_ noCopy
+
 	rwc          io.ReadWriteCloser
 	client       bool
 	br           *bufio.Reader
 	bw           *bufio.Writer
 	writeFrameMu *mutex
 	writerMu     *mutex
+
+	// closing TCP connection state
+	closing atomic.Bool
+	closeMu sync.Mutex
+	closed  chan struct{}
 }
 
 type connConfig struct {
@@ -46,58 +56,16 @@ type connConfig struct {
 	bw     *bufio.Writer
 }
 
-// StatusCode represents a WebSocket status code.
-type StatusCode int
-
-const (
-	StatusNormalClosure   StatusCode = 1000
-	StatusGoingAway       StatusCode = 1001
-	StatusProtocolError   StatusCode = 1002
-	StatusUnsupportedData StatusCode = 1003
-
-	// 1004 is reserved.
-
-	StatusNoStatusReceived        StatusCode = 1005
-	StatusAbnormalClosure         StatusCode = 1006
-	StatusInvalidFramePayloadData StatusCode = 1007
-	StatusPolicyViolation         StatusCode = 1008
-	StatusMessageTooBig           StatusCode = 1009
-	StatusMandatoryExtension      StatusCode = 1010
-	StatusInternalError           StatusCode = 1011
-	StatusServiceRestart          StatusCode = 1012
-	StatusTryAgainLater           StatusCode = 1013
-	StatusBadGateway              StatusCode = 1014
-	StatusTLSHandshake            StatusCode = 1015
-)
-
-// CloseError is returned when the connection is closed with a status and reason.
-type CloseError struct {
-	Code   StatusCode
-	Reason string
-}
-
-func (err CloseError) Error() string {
-	return fmt.Sprintf("websocket: close %d (%s)", err.Code, err.Reason)
-}
-
-// CloseStatus returns the status code from the given error if it is a CloseError.
-//
-// -1 will be returned if the passed error is nil or not a CloseError.
-func CloseStatus(err error) StatusCode {
-	if ce, ok := errors.AsType[CloseError](err); ok {
-		return ce.Code
-	}
-	return -1
-}
-
 func newConn(cfg connConfig) *Conn {
+	closed := make(chan struct{})
 	conn := &Conn{
 		rwc:          cfg.rwc,
 		client:       cfg.client,
 		br:           cfg.br,
 		bw:           cfg.bw,
-		writeFrameMu: newMutex(),
-		writerMu:     newMutex(),
+		writeFrameMu: newMutex(closed),
+		writerMu:     newMutex(closed),
+		closed:       closed,
 	}
 	return conn
 }
@@ -125,32 +93,35 @@ func (c *Conn) Subprotocol() string {
 	return ""
 }
 
-func (c *Conn) Close(code StatusCode, reason string) error {
-	return errors.New("not implemented")
-}
-
-func (c *Conn) CloseNow() error {
-	return errors.New("not implemented")
-}
-
 // mutex is a mutex that can be locked and unlocked with a context.Context.
 type mutex struct {
-	_  noCopy
-	ch chan struct{}
+	_      noCopy
+	ch     chan struct{}
+	closed <-chan struct{}
 }
 
-func newMutex() *mutex {
+func newMutex(closed <-chan struct{}) *mutex {
 	return &mutex{
-		ch: make(chan struct{}, 1),
+		ch:     make(chan struct{}, 1),
+		closed: closed,
 	}
 }
 
 func (m *mutex) lock(ctx context.Context) error {
 	select {
+	case <-m.closed:
+		return net.ErrClosed
 	case <-ctx.Done():
 		return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
 	case m.ch <- struct{}{}:
-		return nil
+		// To make sure the connection is certainly alive.
+		select {
+		case <-m.closed:
+			<-m.ch // unlock
+			return net.ErrClosed
+		default:
+			return nil
+		}
 	}
 }
 

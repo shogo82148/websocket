@@ -19,6 +19,10 @@ const (
 	opPong         opCode = 0xA
 )
 
+// maxControlPayload is the maximum length of a control frame payload.
+// See https://tools.ietf.org/html/rfc6455#section-5.5.
+const maxControlPayload = 125
+
 type frameHeader struct {
 	fin        bool
 	rsv1       bool
