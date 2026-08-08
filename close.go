@@ -86,6 +86,28 @@ func (err CloseError) bytes() ([]byte, error) {
 	return b, nil
 }
 
+func parseClosePayload(p []byte) (CloseError, error) {
+	if len(p) == 0 {
+		return CloseError{Code: StatusNoStatusRcvd}, nil
+	}
+	if len(p) < 2 {
+		return CloseError{}, errors.New("websocket: close payload too short")
+	}
+	if !utf8.Valid(p[2:]) {
+		return CloseError{}, errors.New("websocket: close reason is not valid UTF-8")
+	}
+
+	code := StatusCode(binary.BigEndian.Uint16(p))
+	if !validWireCloseCode(code) {
+		return CloseError{}, fmt.Errorf("websocket: invalid close code: %d", code)
+	}
+
+	return CloseError{
+		Code:   code,
+		Reason: string(p[2:]),
+	}, nil
+}
+
 // CloseStatus returns the status code from the given error if it is a CloseError.
 //
 // -1 will be returned if the passed error is nil or not a CloseError.
