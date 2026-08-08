@@ -30,6 +30,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		// Read the next frame header.
 		h, err := r.conn.readLoop(r.ctx)
 		if err != nil {
+			r.close()
 			if cerr := r.conn.canceledRead(); cerr != nil {
 				return 0, cerr
 			}
@@ -48,6 +49,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		r.mask = maskFramePayload(p[:n], r.mask)
 	}
 	if err != nil {
+		r.close()
 		if cerr := r.conn.canceledRead(); cerr != nil {
 			return 0, cerr
 		}
@@ -91,6 +93,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 
 	h, err := c.readLoop(ctx)
 	if err != nil {
+		c.finishRead()
 		c.readerMu.unlock()
 		if cerr := c.canceledRead(); cerr != nil {
 			return 0, nil, cerr
