@@ -136,7 +136,7 @@ func (c *Conn) Close(code StatusCode, reason string) error {
 // CloseNow closes the WebSocket connection without attempting a close handshake.
 // Use when you do not want the overhead of the close handshake.
 func (c *Conn) CloseNow() error {
-	return errors.New("not implemented")
+	return c.close()
 }
 
 func (c *Conn) closeHandshake(ctx context.Context, code StatusCode, reason string) error {
@@ -184,4 +184,20 @@ func (c *Conn) waitCloseHandshake(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// close closes the underlying connection and unblocks all goroutines interacting with the connection.
+func (c *Conn) close() error {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	default:
+		close(c.closed)
+	}
+
+	err := c.rwc.Close()
+	return err
 }

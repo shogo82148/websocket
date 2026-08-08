@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
+	"sync/atomic"
 )
 
 // MessageType represents the type of a WebSocket message.
@@ -37,6 +39,11 @@ type Conn struct {
 	bw           *bufio.Writer
 	writeFrameMu *mutex
 	writerMu     *mutex
+
+	// closing TCP connection state
+	closing atomic.Bool
+	closeMu sync.Mutex
+	closed  chan struct{}
 }
 
 type connConfig struct {
@@ -47,6 +54,7 @@ type connConfig struct {
 }
 
 func newConn(cfg connConfig) *Conn {
+	closed := make(chan struct{})
 	conn := &Conn{
 		rwc:          cfg.rwc,
 		client:       cfg.client,
@@ -54,6 +62,7 @@ func newConn(cfg connConfig) *Conn {
 		bw:           cfg.bw,
 		writeFrameMu: newMutex(),
 		writerMu:     newMutex(),
+		closed:       closed,
 	}
 	return conn
 }
