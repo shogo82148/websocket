@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -124,7 +123,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
-		return nil, readResponseBody(resp), errors.New("websocket: response body is not a ReadWriteCloser")
+		return nil, readResponseBody(resp), fmt.Errorf("websocket: response body is not a ReadWriteCloser: %T", resp.Body)
 	}
 
 	return newConn(connConfig{
@@ -198,10 +197,10 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 		return fmt.Errorf("websocket: unexpected status code: %d", resp.StatusCode)
 	}
 	if !headerContainsTokenIgnoreCase(resp.Header, "Upgrade", "websocket") {
-		return errors.New("websocket: Upgrade header is not websocket")
+		return errUpgradeHeaderNotWebSocket
 	}
 	if !headerContainsTokenIgnoreCase(resp.Header, "Connection", "Upgrade") {
-		return errors.New("websocket: Connection header is not Upgrade")
+		return errConnectionHeaderNotUpgrade
 	}
 	expectedAccept := acceptHeader(secWebSocketKey)
 	if got := resp.Header.Get("Sec-WebSocket-Accept"); got != expectedAccept {
