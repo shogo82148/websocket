@@ -13,17 +13,6 @@ import (
 	"strings"
 )
 
-type CompressionMode int
-
-const (
-	// CompressionDisabled disables the negotiation of the permessage-deflate extension.
-	CompressionDisabled CompressionMode = iota
-
-	CompressionContextTakeover
-
-	CompressionNoContextTakeover
-)
-
 type AcceptOptions struct {
 	// Subprotocols lists the WebSocket subprotocols that Accept will negotiate with the client.
 	Subprotocols []string
@@ -50,6 +39,14 @@ type AcceptOptions struct {
 
 	// OnPongReceived is an optional callback invoked synchronously when a pong frame is received.
 	OnPongReceived func(ctx context.Context, payload []byte)
+}
+
+func (opts *AcceptOptions) cloneWithDefaults() *AcceptOptions {
+	var o AcceptOptions
+	if opts != nil {
+		o = *opts
+	}
+	return &o
 }
 
 type rwUnwrap interface {
@@ -101,9 +98,9 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
 		return nil, errConnectionHeaderNotUpgrade
 	}
-	if versions := r.Header.Values("Sec-WebSocket-Version"); len(versions) != 1 || versions[0] != "13" {
+	if versions := r.Header.Values("Sec-Websocket-Version"); len(versions) != 1 || versions[0] != "13" {
 		version := strings.Join(versions, ", ")
-		w.Header().Set("Sec-WebSocket-Version", "13")
+		w.Header().Set("Sec-Websocket-Version", "13")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return nil, fmt.Errorf("websocket: unsupported version: %q", version)
 	}
@@ -113,6 +110,8 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		return nil, err
 	}
 
+	opts = opts.cloneWithDefaults()
+
 	// TODO: validate origin
 
 	hijacker, ok := hijacker(w)
@@ -121,11 +120,18 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		return nil, errHijackerNotSupported
 	}
 
-	// Upgrade to WebSocket
 	h := w.Header()
+
+	// negotiate extensions
+	copts, ok := selectDeflate(websocketExtensions(r.Header), opts.CompressionMode)
+	if ok {
+		h.Set("Sec-Websocket-Extensions", copts.String())
+	}
+
+	// Upgrade to WebSocket
 	h.Set("Upgrade", "websocket")
 	h.Set("Connection", "Upgrade")
-	h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+	h.Set("Sec-Websocket-Accept", acceptHeader(key))
 	w.WriteHeader(http.StatusSwitchingProtocols)
 
 	conn, brw, err := hijacker.Hijack()
@@ -165,6 +171,78 @@ func headerTokens(h http.Header, key string) iter.Seq[string] {
 			}
 		}
 	}
+}
+
+type websocketExtension struct {
+	name   string
+	params []string
+}
+
+func websocketExtensions(h http.Header) iter.Seq[websocketExtension] {
+	return func(yield func(websocketExtension) bool) {
+		for extStr := range headerTokens(h, "Sec-Websocket-Extensions") {
+			if extStr == "" {
+				continue
+			}
+
+			vals := strings.Split(extStr, ";")
+			for i := range vals {
+				vals[i] = strings.TrimSpace(vals[i])
+			}
+			ext := websocketExtension{
+				name:   vals[0],
+				params: vals[1:],
+			}
+			if !yield(ext) {
+				return
+			}
+		}
+	}
+}
+
+func selectDeflate(selectDeflate iter.Seq[websocketExtension], mode CompressionMode) (*compressionOptions, bool) {
+	switch mode {
+	case CompressionDisabled:
+		return nil, false
+	case CompressionContextTakeover:
+	case CompressionNoContextTakeover:
+	default:
+		// This should never happen, but if it does, we will treat it as CompressionDisabled.
+		return nil, false
+	}
+
+	for ext := range selectDeflate {
+		switch ext.name {
+		case "permessage-deflate":
+			copts, ok := acceptDeflate(ext, mode)
+			if ok {
+				return copts, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOptions, bool) {
+	copts := mode.opts()
+	for _, p := range ext.params {
+		switch p {
+		case "client_no_context_takeover":
+			copts.clientNoContextTakeover = true
+			continue
+		case "server_no_context_takeover":
+			copts.serverNoContextTakeover = true
+			continue
+		case "client_max_window_bits", "server_max_window_bits":
+			continue
+		}
+		if strings.HasPrefix(p, "client_max_window_bits=") {
+			// We can't adjust the deflate window, but decoding with a larger window is acceptable.
+			continue
+		}
+		return nil, false
+	}
+	return copts, true
 }
 
 func getWebSocketKey(r *http.Request) (string, error) {

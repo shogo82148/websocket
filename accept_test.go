@@ -341,6 +341,45 @@ func TestAccept(t *testing.T) {
 			t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 		}
 	})
+
+	t.Run("negotiate extensions", func(t *testing.T) {
+		t.Parallel()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := Accept(w, r, &AcceptOptions{
+				CompressionMode: CompressionContextTakeover,
+			})
+			if err != nil {
+				t.Errorf("Accept failed: %v", err)
+				return
+			}
+			conn.CloseNow()
+		}))
+		defer ts.Close()
+
+		ctx := t.Context()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		if err != nil {
+			t.Fatalf("http.NewRequestWithContext failed: %v", err)
+		}
+		h := req.Header
+		h.Set("Upgrade", "websocket")
+		h.Set("Connection", "Upgrade")
+		h.Set("Sec-WebSocket-Version", "13")
+		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Origin", "http://example.com")
+		h.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("http.Client.Do failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get("Sec-WebSocket-Extensions") != "permessage-deflate" {
+			t.Errorf("unexpected Sec-WebSocket-Extensions header: got %q, want %q", resp.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+		}
+	})
 }
 
 func BenchmarkAcceptHeader(b *testing.B) {
