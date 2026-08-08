@@ -35,14 +35,23 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	*conn
+}
+
+type conn struct {
 	_ noCopy
 
-	rwc          io.ReadWriteCloser
-	client       bool
-	br           *bufio.Reader
-	bw           *bufio.Writer
-	writeFrameMu *mutex
+	rwc    io.ReadWriteCloser
+	client bool
+	br     *bufio.Reader
+	bw     *bufio.Writer
+
+	// for synchronizing reads
+	readerMu *mutex
+
+	// for synchronizing writes
 	writerMu     *mutex
+	writeFrameMu *mutex
 
 	// for handling context cancellation
 	watcher     chan<- context.Context
@@ -65,20 +74,23 @@ type connConfig struct {
 
 func newConn(cfg connConfig) *Conn {
 	closed := make(chan struct{})
-	conn := &Conn{
-		rwc:          cfg.rwc,
-		client:       cfg.client,
-		br:           cfg.br,
-		bw:           cfg.bw,
-		writeFrameMu: newMutex(closed),
-		writerMu:     newMutex(closed),
-		closed:       closed,
+	c := &Conn{
+		conn: &conn{
+			rwc:          cfg.rwc,
+			client:       cfg.client,
+			br:           cfg.br,
+			bw:           cfg.bw,
+			readerMu:     newMutex(closed),
+			writerMu:     newMutex(closed),
+			writeFrameMu: newMutex(closed),
+			closed:       closed,
+		},
 	}
-	runtime.AddCleanup(conn, func(rwc io.ReadWriteCloser) {
-		rwc.Close()
-	}, cfg.rwc)
-	conn.startWatcher()
-	return conn
+	runtime.AddCleanup(c, func(c *conn) {
+		c.close()
+	}, c.conn)
+	c.startWatcher()
+	return c
 }
 
 // Ping sends a ping to the peer and waits for a pong.
@@ -104,12 +116,14 @@ func (c *Conn) Subprotocol() string {
 	return ""
 }
 
-func (c *Conn) startWatcher() {
+func (c *conn) startWatcher() {
 	watcher := make(chan context.Context, 1)
 	c.watcher = watcher
 
 	finished := make(chan struct{})
 	c.finished = finished
+
+	closed := c.closed
 
 	// watcher goroutine
 	go func() {
@@ -117,7 +131,7 @@ func (c *Conn) startWatcher() {
 			var ctx context.Context
 			select {
 			case ctx = <-watcher:
-			case <-c.closed:
+			case <-closed:
 				// connection closed, exit goroutine
 				return
 			}
@@ -127,7 +141,7 @@ func (c *Conn) startWatcher() {
 			case <-ctx.Done():
 				c.cancel(ctx.Err())
 			case <-finished:
-			case <-c.closed:
+			case <-closed:
 				// connection closed, exit goroutine
 				return
 			}
@@ -136,7 +150,7 @@ func (c *Conn) startWatcher() {
 }
 
 // watchCancel watches the context for cancellation and cancels the connection if the context is canceled.
-func (c *Conn) watchCancel(ctx context.Context) error {
+func (c *conn) watchCancel(ctx context.Context) error {
 	// check if the connection is already closed
 	select {
 	case <-ctx.Done():
@@ -148,7 +162,7 @@ func (c *Conn) watchCancel(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conn) finish() {
+func (c *conn) finish() {
 	select {
 	case c.finished <- struct{}{}:
 	case <-c.closed:
@@ -156,7 +170,7 @@ func (c *Conn) finish() {
 }
 
 // cancel cancels the connection and unblocks all goroutines interacting with the connection.
-func (c *Conn) cancel(err error) {
+func (c *conn) cancel(err error) {
 	c.canceledMu.Lock()
 	c.canceledErr = err
 	c.canceledMu.Unlock()
@@ -165,7 +179,7 @@ func (c *Conn) cancel(err error) {
 }
 
 // canceled returns the error that caused the connection to be canceled, or nil if the connection was not canceled.
-func (c *Conn) canceled() error {
+func (c *conn) canceled() error {
 	c.canceledMu.Lock()
 	defer c.canceledMu.Unlock()
 	return c.canceledErr
