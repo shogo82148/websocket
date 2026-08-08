@@ -98,9 +98,9 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		http.Error(w, http.StatusText(http.StatusUpgradeRequired), http.StatusUpgradeRequired)
 		return nil, errConnectionHeaderNotUpgrade
 	}
-	if versions := r.Header.Values("Sec-WebSocket-Version"); len(versions) != 1 || versions[0] != "13" {
+	if versions := r.Header.Values("Sec-Websocket-Version"); len(versions) != 1 || versions[0] != "13" {
 		version := strings.Join(versions, ", ")
-		w.Header().Set("Sec-WebSocket-Version", "13")
+		w.Header().Set("Sec-Websocket-Version", "13")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return nil, fmt.Errorf("websocket: unsupported version: %q", version)
 	}
@@ -125,13 +125,13 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	// negotiate extensions
 	copts, ok := selectDeflate(websocketExtensions(r.Header), opts.CompressionMode)
 	if ok {
-		h.Set("Sec-WebSocket-Extensions", copts.String())
+		h.Set("Sec-Websocket-Extensions", copts.String())
 	}
 
 	// Upgrade to WebSocket
 	h.Set("Upgrade", "websocket")
 	h.Set("Connection", "Upgrade")
-	h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+	h.Set("Sec-Websocket-Accept", acceptHeader(key))
 	w.WriteHeader(http.StatusSwitchingProtocols)
 
 	conn, brw, err := hijacker.Hijack()
@@ -227,7 +227,7 @@ func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOp
 		case "server_no_context_takeover":
 			copts.serverNoContextTakeover = true
 			continue
-		case "client_max_window_bits", "server_max_window_bits=15":
+		case "client_max_window_bits", "server_max_window_bits":
 			continue
 		}
 		if strings.HasPrefix(p, "client_max_window_bits=") {
