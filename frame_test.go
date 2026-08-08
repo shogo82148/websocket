@@ -3,10 +3,99 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"io"
+	"math/bits"
+	mathrand "math/rand/v2"
+	"slices"
 	"testing"
 )
+
+func basicMask(payload []byte, key uint32) uint32 {
+	for i := range payload {
+		payload[i] ^= byte(key >> 24)
+		key = bits.RotateLeft32(key, 8)
+	}
+	return key
+}
+
+func TestMaskFramePayload(t *testing.T) {
+	testMask(t, "maskFramePayload", maskFramePayload)
+	testMask(t, "maskFramePayloadBigEndian", maskFramePayloadBigEndian)
+	testMask(t, "maskFramePayloadLittleEndian", maskFramePayloadLittleEndian)
+}
+
+func testMask(t *testing.T, name string, fn func(payload []byte, key uint32) uint32) {
+	t.Run(name, func(t *testing.T) {
+		for range 100 {
+			// generate key
+			var buf [4]byte
+			rand.Read(buf[:])
+			key := binary.BigEndian.Uint32(buf[:])
+
+			n := mathrand.IntN(1024 * 1024)
+			b := make([]byte, n)
+			rand.Read(b)
+
+			b2 := slices.Clone(b)
+			b3 := slices.Clone(b)
+
+			key2 := basicMask(b2, key)
+			key3 := fn(b3, key)
+
+			if key2 != key3 {
+				t.Errorf("mask key = %x, want %x", key3, key2)
+			}
+			if !bytes.Equal(b2, b3) {
+				t.Error("masked payload mismatch")
+			}
+		}
+	})
+}
+
+func BenchmarkMaskFramePayload(b *testing.B) {
+	b.Run("basic", func(b *testing.B) {
+		data := make([]byte, 1024*1024) // 1MB
+		maskKey := uint32(0x01020304)
+		b.ResetTimer()
+		b.SetBytes(int64(len(data)))
+		for b.Loop() {
+			basicMask(data, maskKey)
+		}
+	})
+
+	b.Run("maskFramePayload", func(b *testing.B) {
+		data := make([]byte, 1024*1024) // 1MB
+		maskKey := uint32(0x01020304)
+		b.ResetTimer()
+		b.SetBytes(int64(len(data)))
+		for b.Loop() {
+			maskFramePayload(data, maskKey)
+		}
+	})
+
+	b.Run("maskFramePayloadBigEndian", func(b *testing.B) {
+		data := make([]byte, 1024*1024) // 1MB
+		maskKey := uint32(0x01020304)
+		b.ResetTimer()
+		b.SetBytes(int64(len(data)))
+		for b.Loop() {
+			maskFramePayloadBigEndian(data, maskKey)
+		}
+	})
+
+	b.Run("maskFramePayloadLittleEndian", func(b *testing.B) {
+		data := make([]byte, 1024*1024) // 1MB
+		maskKey := uint32(0x01020304)
+		b.ResetTimer()
+		b.SetBytes(int64(len(data)))
+		for b.Loop() {
+			maskFramePayloadLittleEndian(data, maskKey)
+		}
+	})
+}
 
 func TestWriteFrameHeader(t *testing.T) {
 	tests := []struct {
