@@ -25,7 +25,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		// Read the next frame header.
 		h, err := r.conn.readLoop(r.ctx)
 		if err != nil {
-			if cerr := r.conn.canceled(); cerr != nil {
+			if cerr := r.conn.canceledRead(); cerr != nil {
 				return 0, cerr
 			}
 			return 0, err
@@ -43,7 +43,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		r.mask = maskFramePayload(p[:n], r.mask)
 	}
 	if err != nil {
-		if cerr := r.conn.canceled(); cerr != nil {
+		if cerr := r.conn.canceledRead(); cerr != nil {
 			return 0, cerr
 		}
 		return n, err
@@ -63,7 +63,7 @@ func (r *messageReader) setHeader(h frameHeader) {
 }
 
 func (r *messageReader) close() error {
-	r.conn.finish()
+	r.conn.finishRead()
 	r.conn.readerMu.unlock()
 	return nil
 }
@@ -75,7 +75,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		return 0, nil, err
 	}
 
-	if err := c.watchCancel(ctx); err != nil {
+	if err := c.watchReadCancel(ctx); err != nil {
 		c.readerMu.unlock()
 		return 0, nil, err
 	}
@@ -83,7 +83,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	h, err := c.readLoop(ctx)
 	if err != nil {
 		c.readerMu.unlock()
-		if cerr := c.canceled(); cerr != nil {
+		if cerr := c.canceledRead(); cerr != nil {
 			return 0, nil, cerr
 		}
 		return 0, nil, err
