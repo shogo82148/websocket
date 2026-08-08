@@ -211,6 +211,9 @@ func (m *mutex) lock(ctx context.Context) error {
 		case <-m.closed:
 			<-m.ch // unlock
 			return net.ErrClosed
+		case <-ctx.Done():
+			<-m.ch // unlock
+			return fmt.Errorf("websocket: failed to acquire lock: %w", ctx.Err())
 		default:
 			return nil
 		}
