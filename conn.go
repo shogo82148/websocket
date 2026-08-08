@@ -34,6 +34,8 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	_ noCopy
+
 	rwc          io.ReadWriteCloser
 	client       bool
 	br           *bufio.Reader
