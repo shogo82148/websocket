@@ -39,9 +39,10 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 	}
 
 	return newConn(connConfig{
-		rwc: rwc,
-		br:  bufio.NewReader(rwc),
-		bw:  bufio.NewWriter(rwc),
+		rwc:    rwc,
+		client: true,
+		br:     bufio.NewReader(rwc),
+		bw:     bufio.NewWriter(rwc),
 	})
 }
 
@@ -177,6 +178,7 @@ func TestConnReader(t *testing.T) {
 
 		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}
 		conn := newTestConnWithInput(t, frame)
+		conn.client = false // disable masking for outgoing frames
 		_, r, err := conn.Reader(ctx)
 		if err != nil {
 			t.Fatalf("Reader failed: %v", err)
@@ -236,7 +238,7 @@ func TestLimitReader(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
 
-		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
+		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}
 		rwc := new(testReadWriteCloser)
 		if _, err := rwc.r.Write(frame); err != nil {
 			t.Fatalf("failed to prepare test input: %v", err)

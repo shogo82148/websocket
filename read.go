@@ -181,7 +181,10 @@ func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 			return frameHeader{}, err
 		}
 
-		// TODO: verify the frame header
+		// verify the frame header
+		if !c.client && !h.mask {
+			return frameHeader{}, errors.New("websocket: received unmasked frame from client")
+		}
 
 		switch h.opCode {
 		case opClose, opPing, opPong:
