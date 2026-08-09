@@ -27,6 +27,7 @@ func newMessageReader(conn *Conn) *messageReader {
 func (r *messageReader) reset(ctx context.Context, h frameHeader) {
 	r.ctx = ctx
 	r.flate = h.rsv1
+	r.closed = false
 	r.setHeader(h)
 }
 
