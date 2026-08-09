@@ -38,6 +38,10 @@ type Conn struct {
 	_ noCopy
 	*conn
 
+	// for handling compression
+	copts          *compressionOptions
+	flateThreshold int
+
 	// for synchronizing reads
 	readerMu  *mutex
 	msgReader *messageReader
@@ -51,12 +55,10 @@ type Conn struct {
 type conn struct {
 	_ noCopy
 
-	rwc            io.ReadWriteCloser
-	client         bool
-	copts          *compressionOptions
-	flateThreshold int
-	br             *bufio.Reader
-	bw             *bufio.Writer
+	rwc    io.ReadWriteCloser
+	client bool
+	br     *bufio.Reader
+	bw     *bufio.Writer
 
 	// for handling context cancellation
 	readWatcher      chan<- context.Context
@@ -88,16 +90,17 @@ func newConn(cfg connConfig) *Conn {
 	closed := make(chan struct{})
 	c := &Conn{
 		conn: &conn{
-			rwc:            cfg.rwc,
-			client:         cfg.client,
-			copts:          cfg.copts,
-			flateThreshold: cfg.flateThreshold,
+			rwc:    cfg.rwc,
+			client: cfg.client,
 
 			br: cfg.br,
 			bw: cfg.bw,
 
 			closed: closed,
 		},
+		copts:          cfg.copts,
+		flateThreshold: cfg.flateThreshold,
+
 		readerMu:     newMutex(closed),
 		writerMu:     newMutex(closed),
 		writeFrameMu: newMutex(closed),
@@ -130,7 +133,7 @@ func newConn(cfg connConfig) *Conn {
 }
 
 // flate returns true if the connection is using permessage-deflate compression.
-func (c *conn) flate() bool {
+func (c *Conn) flate() bool {
 	return c.copts != nil
 }
 
