@@ -35,7 +35,17 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	_ noCopy
 	*conn
+
+	// for synchronizing reads
+	readerMu  *mutex
+	msgReader *messageReader
+
+	// for synchronizing writes
+	writerMu     *mutex
+	writeFrameMu *mutex
+	msgWriter    *messageWriter
 }
 
 type conn struct {
@@ -45,13 +55,6 @@ type conn struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
-
-	// for synchronizing reads
-	readerMu *mutex
-
-	// for synchronizing writes
-	writerMu     *mutex
-	writeFrameMu *mutex
 
 	// for handling context cancellation
 	readWatcher      chan<- context.Context
@@ -80,16 +83,20 @@ func newConn(cfg connConfig) *Conn {
 	closed := make(chan struct{})
 	c := &Conn{
 		conn: &conn{
-			rwc:          cfg.rwc,
-			client:       cfg.client,
-			br:           cfg.br,
-			bw:           cfg.bw,
-			readerMu:     newMutex(closed),
-			writerMu:     newMutex(closed),
-			writeFrameMu: newMutex(closed),
-			closed:       closed,
+			rwc:    cfg.rwc,
+			client: cfg.client,
+			br:     cfg.br,
+			bw:     cfg.bw,
+			closed: closed,
 		},
+		readerMu:     newMutex(closed),
+		writerMu:     newMutex(closed),
+		writeFrameMu: newMutex(closed),
 	}
+
+	c.msgReader = newMessageReader(c)
+	c.msgWriter = newMessageWriter(c)
+
 	runtime.AddCleanup(c, func(c *conn) {
 		_ = c.close()
 	}, c.conn)
