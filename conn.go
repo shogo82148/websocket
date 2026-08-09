@@ -36,6 +36,10 @@ func (t MessageType) String() string {
 
 type Conn struct {
 	*conn
+
+	// for synchronizing reads
+	readerMu  *mutex
+	msgReader *messageReader
 }
 
 type conn struct {
@@ -45,9 +49,6 @@ type conn struct {
 	client bool
 	br     *bufio.Reader
 	bw     *bufio.Writer
-
-	// for synchronizing reads
-	readerMu *mutex
 
 	// for synchronizing writes
 	writerMu     *mutex
@@ -84,12 +85,15 @@ func newConn(cfg connConfig) *Conn {
 			client:       cfg.client,
 			br:           cfg.br,
 			bw:           cfg.bw,
-			readerMu:     newMutex(closed),
 			writerMu:     newMutex(closed),
 			writeFrameMu: newMutex(closed),
 			closed:       closed,
 		},
+		readerMu: newMutex(closed),
 	}
+
+	c.msgReader = newMessageReader(c)
+
 	runtime.AddCleanup(c, func(c *conn) {
 		_ = c.close()
 	}, c.conn)

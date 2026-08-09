@@ -11,10 +11,29 @@ import (
 type messageReader struct {
 	ctx        context.Context
 	conn       *Conn
+	flate      bool
 	fin        bool
 	payloadLen int64
 	mask       uint32
 	closed     bool
+}
+
+func newMessageReader(conn *Conn) *messageReader {
+	return &messageReader{
+		conn: conn,
+	}
+}
+
+func (r *messageReader) reset(ctx context.Context, h frameHeader) {
+	r.ctx = ctx
+	r.flate = h.rsv1
+	r.setHeader(h)
+}
+
+func (r *messageReader) setHeader(h frameHeader) {
+	r.fin = h.fin
+	r.payloadLen = h.payloadLen
+	r.mask = h.maskKey
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
@@ -63,12 +82,6 @@ func (r *messageReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (r *messageReader) setHeader(h frameHeader) {
-	r.fin = h.fin
-	r.payloadLen = h.payloadLen
-	r.mask = h.maskKey
-}
-
 func (r *messageReader) close() error {
 	if r.closed {
 		return net.ErrClosed
@@ -100,11 +113,8 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		}
 		return 0, nil, err
 	}
-	r := &messageReader{
-		ctx:  ctx,
-		conn: c,
-	}
-	r.setHeader(h)
+	r := c.msgReader
+	r.reset(ctx, h)
 	return MessageType(h.opCode), r, nil
 }
 
