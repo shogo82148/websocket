@@ -21,8 +21,9 @@ type messageReader struct {
 	dict        *slidingWindow
 
 	fin        bool
+	mask       bool
 	payloadLen int64
-	mask       uint32
+	maskKey    uint32
 	closed     bool
 }
 
@@ -42,7 +43,8 @@ func (r *messageReader) reset(ctx context.Context, h frameHeader) {
 func (r *messageReader) setHeader(h frameHeader) {
 	r.fin = h.fin
 	r.payloadLen = h.payloadLen
-	r.mask = h.maskKey
+	r.mask = h.mask
+	r.maskKey = h.maskKey
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
@@ -73,8 +75,8 @@ func (r *messageReader) Read(p []byte) (int, error) {
 	}
 	n, err := r.conn.br.Read(p)
 	r.payloadLen -= int64(n)
-	if !r.conn.client {
-		r.mask = maskFramePayload(p[:n], r.mask)
+	if r.mask {
+		r.maskKey = maskFramePayload(p[:n], r.maskKey)
 	}
 	if err != nil {
 		r.close()
