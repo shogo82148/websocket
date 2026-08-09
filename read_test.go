@@ -228,3 +228,34 @@ func TestConnReader(t *testing.T) {
 		}
 	})
 }
+
+func TestLimitReader(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrMessageTooBig when limit is exceeded", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+		conn.SetReadLimit(3) // set limit to 3 bytes
+		_, _, err := conn.Read(ctx)
+		if !errors.Is(err, ErrMessageTooBig) {
+			t.Fatalf("Read error = %v; want %v", err, ErrMessageTooBig)
+		}
+
+		want := []byte{0x88, 0x0c, 0x03, 0xf1, 0x72, 0x65, 0x61, 0x64, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74}
+		if got := rwc.w.Bytes(); !bytes.Equal(got, want) {
+			t.Fatalf("written bytes = %x; want %x", got, want)
+		}
+	})
+}

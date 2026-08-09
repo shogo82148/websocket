@@ -43,8 +43,9 @@ type Conn struct {
 	flateThreshold int
 
 	// for synchronizing reads
-	readerMu  *mutex
-	msgReader *messageReader
+	readerMu    *mutex
+	msgReader   *messageReader
+	limitReader *limitReader
 
 	// for synchronizing writes
 	writerMu     *mutex
@@ -107,6 +108,7 @@ func newConn(cfg connConfig) *Conn {
 	}
 
 	c.msgReader = newMessageReader(c)
+	c.limitReader = newLimitReader(c, 32*1024) // default read limit is 32KiB
 	c.msgWriter = newMessageWriter(c)
 
 	if c.flate() && c.flateThreshold == 0 {
@@ -140,18 +142,6 @@ func (c *Conn) flate() bool {
 // Ping sends a ping to the peer and waits for a pong.
 func (c *Conn) Ping(ctx context.Context) error {
 	return errors.New("not implemented")
-}
-
-// SetReadLimit sets the max number of bytes to read for a single message.
-// It applies to the Reader and Read methods.
-//
-// By default, the connection has a message read limit of 32768 bytes.
-//
-// When the limit is hit, reads return an error wrapping ErrMessageTooBig and the connection is closed with StatusMessageTooBig.
-//
-// Set to -1 to disable.
-func (c *Conn) SetReadLimit(limit int64) {
-	// TODO: implement SetReadLimit
 }
 
 // Subprotocol returns the negotiated subprotocol.

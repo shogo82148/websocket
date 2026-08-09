@@ -18,7 +18,6 @@ type messageReader struct {
 	flateReader io.Reader
 	flateBufio  *bufio.Reader
 	flateTail   strings.Reader
-	limitReader *limitReader
 	dict        *slidingWindow
 
 	fin        bool
@@ -123,9 +122,12 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		}
 		return 0, nil, err
 	}
+
 	r := c.msgReader
 	r.reset(ctx, h)
-	return MessageType(h.opCode), r, nil
+	lr := c.limitReader
+	lr.reset(ctx, r)
+	return MessageType(h.opCode), lr, nil
 }
 
 // Read reads a single WebSocket message from the connection.
@@ -140,6 +142,18 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 		return 0, nil, err
 	}
 	return typ, data, nil
+}
+
+// SetReadLimit sets the max number of bytes to read for a single message.
+// It applies to the Reader and Read methods.
+//
+// By default, the connection has a message read limit of 32768 bytes.
+//
+// When the limit is hit, reads return an error wrapping ErrMessageTooBig and the connection is closed with StatusMessageTooBig.
+//
+// Set to -1 to disable.
+func (c *Conn) SetReadLimit(limit int64) {
+	c.limitReader.limit.Store(limit)
 }
 
 // CloseRead starts a goroutine to read from the connection until it is closed
@@ -241,6 +255,9 @@ func newLimitReader(c *Conn, limit int64) *limitReader {
 func (lr *limitReader) reset(ctx context.Context, r io.Reader) {
 	lr.ctx = ctx
 	lr.n = lr.limit.Load()
+	if lr.n >= 0 {
+		lr.n++ // add 1 to detect limit exceeded
+	}
 	lr.r = r
 }
 
