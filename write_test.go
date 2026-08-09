@@ -10,7 +10,15 @@ import (
 )
 
 type testReadWriteCloser struct {
-	bytes.Buffer
+	r, w bytes.Buffer
+}
+
+func (rw *testReadWriteCloser) Read(p []byte) (int, error) {
+	return rw.r.Read(p)
+}
+
+func (rw *testReadWriteCloser) Write(p []byte) (int, error) {
+	return rw.w.Write(p)
 }
 
 func (rw *testReadWriteCloser) Close() error {
@@ -38,7 +46,7 @@ func TestConnWriter(t *testing.T) {
 		}
 
 		expected := []byte{0x01, 0x05, 'h', 'e', 'l', 'l', 'o', 0x80, 0x00}
-		if got := rwc.Bytes(); !bytes.Equal(got, expected) {
+		if got := rwc.w.Bytes(); !bytes.Equal(got, expected) {
 			t.Fatalf("unexpected frame bytes: got %v, want %v", got, expected)
 		}
 	})
@@ -66,7 +74,7 @@ func TestConnWriter(t *testing.T) {
 		}
 
 		expected := []byte{0x02, 0x02, 0x01, 0x02, 0x00, 0x01, 0x03, 0x80, 0x00}
-		if got := rwc.Bytes(); !bytes.Equal(got, expected) {
+		if got := rwc.w.Bytes(); !bytes.Equal(got, expected) {
 			t.Fatalf("unexpected frame bytes: got %v, want %v", got, expected)
 		}
 	})
@@ -170,7 +178,7 @@ func TestConnWrite(t *testing.T) {
 		}
 
 		expected := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
-		if got := rwc.Bytes(); !bytes.Equal(got, expected) {
+		if got := rwc.w.Bytes(); !bytes.Equal(got, expected) {
 			t.Fatalf("unexpected frame bytes: got %v, want %v", got, expected)
 		}
 	})
@@ -220,7 +228,7 @@ func TestConnWrite(t *testing.T) {
 		}
 
 		expected := []byte{0x81, 0x00, 0x82, 0x02, 0x01, 0x02}
-		if got := rwc.Bytes(); !bytes.Equal(got, expected) {
+		if got := rwc.w.Bytes(); !bytes.Equal(got, expected) {
 			t.Fatalf("unexpected frame bytes: got %v, want %v", got, expected)
 		}
 	})

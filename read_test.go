@@ -34,7 +34,7 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 	t.Helper()
 
 	rwc := new(testReadWriteCloser)
-	if _, err := rwc.Write(input); err != nil {
+	if _, err := rwc.r.Write(input); err != nil {
 		t.Fatalf("failed to prepare test input: %v", err)
 	}
 

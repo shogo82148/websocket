@@ -35,7 +35,17 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	_ noCopy
 	*conn
+
+	// for synchronizing reads
+	readerMu  *mutex
+	msgReader *messageReader
+
+	// for synchronizing writes
+	writerMu     *mutex
+	writeFrameMu *mutex
+	msgWriter    *messageWriter
 }
 
 type conn struct {
@@ -47,13 +57,6 @@ type conn struct {
 	flateThreshold int
 	br             *bufio.Reader
 	bw             *bufio.Writer
-
-	// for synchronizing reads
-	readerMu *mutex
-
-	// for synchronizing writes
-	writerMu     *mutex
-	writeFrameMu *mutex
 
 	// for handling context cancellation
 	readWatcher      chan<- context.Context
@@ -93,12 +96,15 @@ func newConn(cfg connConfig) *Conn {
 			br: cfg.br,
 			bw: cfg.bw,
 
-			readerMu:     newMutex(closed),
-			writerMu:     newMutex(closed),
-			writeFrameMu: newMutex(closed),
-			closed:       closed,
+			closed: closed,
 		},
+		readerMu:     newMutex(closed),
+		writerMu:     newMutex(closed),
+		writeFrameMu: newMutex(closed),
 	}
+
+	c.msgReader = newMessageReader(c)
+	c.msgWriter = newMessageWriter(c)
 
 	if c.flate() && c.flateThreshold == 0 {
 		var flateContextTakeover bool
