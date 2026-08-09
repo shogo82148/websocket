@@ -34,11 +34,214 @@ type frameHeader struct {
 	payloadLen int64
 }
 
-func maskFramePayload(payload []byte, key uint32) uint32 {
+var maskFramePayload func(payload []byte, key uint32) uint32
+
+func init() {
+	buf := [2]byte{0x01, 0x00}
+	v := binary.NativeEndian.Uint16(buf[:])
+	if v == 0x0100 {
+		maskFramePayload = maskFramePayloadBigEndian
+	} else {
+		maskFramePayload = maskFramePayloadLittleEndian
+	}
+}
+
+func maskFramePayloadBigEndian(payload []byte, key uint32) uint32 {
+	key64 := uint64(key)<<32 | uint64(key)
+	for len(payload) >= 128 {
+		v := binary.BigEndian.Uint64(payload[:8])
+		binary.BigEndian.PutUint64(payload[:8], v^key64)
+		v = binary.BigEndian.Uint64(payload[8:16])
+		binary.BigEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.BigEndian.Uint64(payload[16:24])
+		binary.BigEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.BigEndian.Uint64(payload[24:32])
+		binary.BigEndian.PutUint64(payload[24:32], v^key64)
+		v = binary.BigEndian.Uint64(payload[32:40])
+		binary.BigEndian.PutUint64(payload[32:40], v^key64)
+		v = binary.BigEndian.Uint64(payload[40:48])
+		binary.BigEndian.PutUint64(payload[40:48], v^key64)
+		v = binary.BigEndian.Uint64(payload[48:56])
+		binary.BigEndian.PutUint64(payload[48:56], v^key64)
+		v = binary.BigEndian.Uint64(payload[56:64])
+		binary.BigEndian.PutUint64(payload[56:64], v^key64)
+		v = binary.BigEndian.Uint64(payload[64:72])
+		binary.BigEndian.PutUint64(payload[64:72], v^key64)
+		v = binary.BigEndian.Uint64(payload[72:80])
+		binary.BigEndian.PutUint64(payload[72:80], v^key64)
+		v = binary.BigEndian.Uint64(payload[80:88])
+		binary.BigEndian.PutUint64(payload[80:88], v^key64)
+		v = binary.BigEndian.Uint64(payload[88:96])
+		binary.BigEndian.PutUint64(payload[88:96], v^key64)
+		v = binary.BigEndian.Uint64(payload[96:104])
+		binary.BigEndian.PutUint64(payload[96:104], v^key64)
+		v = binary.BigEndian.Uint64(payload[104:112])
+		binary.BigEndian.PutUint64(payload[104:112], v^key64)
+		v = binary.BigEndian.Uint64(payload[112:120])
+		binary.BigEndian.PutUint64(payload[112:120], v^key64)
+		v = binary.BigEndian.Uint64(payload[120:128])
+		binary.BigEndian.PutUint64(payload[120:128], v^key64)
+		payload = payload[128:]
+	}
+
+	for len(payload) >= 64 {
+		v := binary.BigEndian.Uint64(payload[:8])
+		binary.BigEndian.PutUint64(payload[:8], v^key64)
+		v = binary.BigEndian.Uint64(payload[8:16])
+		binary.BigEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.BigEndian.Uint64(payload[16:24])
+		binary.BigEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.BigEndian.Uint64(payload[24:32])
+		binary.BigEndian.PutUint64(payload[24:32], v^key64)
+		v = binary.BigEndian.Uint64(payload[32:40])
+		binary.BigEndian.PutUint64(payload[32:40], v^key64)
+		v = binary.BigEndian.Uint64(payload[40:48])
+		binary.BigEndian.PutUint64(payload[40:48], v^key64)
+		v = binary.BigEndian.Uint64(payload[48:56])
+		binary.BigEndian.PutUint64(payload[48:56], v^key64)
+		v = binary.BigEndian.Uint64(payload[56:64])
+		binary.BigEndian.PutUint64(payload[56:64], v^key64)
+		payload = payload[64:]
+	}
+
+	for len(payload) >= 32 {
+		v := binary.BigEndian.Uint64(payload[:8])
+		binary.BigEndian.PutUint64(payload[:8], v^key64)
+		v = binary.BigEndian.Uint64(payload[8:16])
+		binary.BigEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.BigEndian.Uint64(payload[16:24])
+		binary.BigEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.BigEndian.Uint64(payload[24:32])
+		binary.BigEndian.PutUint64(payload[24:32], v^key64)
+		payload = payload[32:]
+	}
+
+	for len(payload) >= 16 {
+		v := binary.BigEndian.Uint64(payload[:8])
+		binary.BigEndian.PutUint64(payload[:8], v^key64)
+		v = binary.BigEndian.Uint64(payload[8:16])
+		binary.BigEndian.PutUint64(payload[8:16], v^key64)
+		payload = payload[16:]
+	}
+
+	for len(payload) >= 8 {
+		v := binary.BigEndian.Uint64(payload[:8])
+		binary.BigEndian.PutUint64(payload[:8], v^key64)
+		payload = payload[8:]
+	}
+
+	for len(payload) >= 4 {
+		v := binary.BigEndian.Uint32(payload[:4])
+		binary.BigEndian.PutUint32(payload[:4], v^key)
+		payload = payload[4:]
+	}
+
+	// xor remaining bytes.
 	for i := range payload {
 		payload[i] ^= byte(key >> 24)
 		key = bits.RotateLeft32(key, 8)
 	}
+	return key
+}
+
+func maskFramePayloadLittleEndian(payload []byte, key uint32) uint32 {
+	key = bits.ReverseBytes32(key)
+	key64 := uint64(key)<<32 | uint64(key)
+
+	for len(payload) >= 128 {
+		v := binary.LittleEndian.Uint64(payload[:8])
+		binary.LittleEndian.PutUint64(payload[:8], v^key64)
+		v = binary.LittleEndian.Uint64(payload[8:16])
+		binary.LittleEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.LittleEndian.Uint64(payload[16:24])
+		binary.LittleEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.LittleEndian.Uint64(payload[24:32])
+		binary.LittleEndian.PutUint64(payload[24:32], v^key64)
+		v = binary.LittleEndian.Uint64(payload[32:40])
+		binary.LittleEndian.PutUint64(payload[32:40], v^key64)
+		v = binary.LittleEndian.Uint64(payload[40:48])
+		binary.LittleEndian.PutUint64(payload[40:48], v^key64)
+		v = binary.LittleEndian.Uint64(payload[48:56])
+		binary.LittleEndian.PutUint64(payload[48:56], v^key64)
+		v = binary.LittleEndian.Uint64(payload[56:64])
+		binary.LittleEndian.PutUint64(payload[56:64], v^key64)
+		v = binary.LittleEndian.Uint64(payload[64:72])
+		binary.LittleEndian.PutUint64(payload[64:72], v^key64)
+		v = binary.LittleEndian.Uint64(payload[72:80])
+		binary.LittleEndian.PutUint64(payload[72:80], v^key64)
+		v = binary.LittleEndian.Uint64(payload[80:88])
+		binary.LittleEndian.PutUint64(payload[80:88], v^key64)
+		v = binary.LittleEndian.Uint64(payload[88:96])
+		binary.LittleEndian.PutUint64(payload[88:96], v^key64)
+		v = binary.LittleEndian.Uint64(payload[96:104])
+		binary.LittleEndian.PutUint64(payload[96:104], v^key64)
+		v = binary.LittleEndian.Uint64(payload[104:112])
+		binary.LittleEndian.PutUint64(payload[104:112], v^key64)
+		v = binary.LittleEndian.Uint64(payload[112:120])
+		binary.LittleEndian.PutUint64(payload[112:120], v^key64)
+		v = binary.LittleEndian.Uint64(payload[120:128])
+		binary.LittleEndian.PutUint64(payload[120:128], v^key64)
+		payload = payload[128:]
+	}
+
+	for len(payload) >= 64 {
+		v := binary.LittleEndian.Uint64(payload[:8])
+		binary.LittleEndian.PutUint64(payload[:8], v^key64)
+		v = binary.LittleEndian.Uint64(payload[8:16])
+		binary.LittleEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.LittleEndian.Uint64(payload[16:24])
+		binary.LittleEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.LittleEndian.Uint64(payload[24:32])
+		binary.LittleEndian.PutUint64(payload[24:32], v^key64)
+		v = binary.LittleEndian.Uint64(payload[32:40])
+		binary.LittleEndian.PutUint64(payload[32:40], v^key64)
+		v = binary.LittleEndian.Uint64(payload[40:48])
+		binary.LittleEndian.PutUint64(payload[40:48], v^key64)
+		v = binary.LittleEndian.Uint64(payload[48:56])
+		binary.LittleEndian.PutUint64(payload[48:56], v^key64)
+		v = binary.LittleEndian.Uint64(payload[56:64])
+		binary.LittleEndian.PutUint64(payload[56:64], v^key64)
+		payload = payload[64:]
+	}
+
+	for len(payload) >= 32 {
+		v := binary.LittleEndian.Uint64(payload[:8])
+		binary.LittleEndian.PutUint64(payload[:8], v^key64)
+		v = binary.LittleEndian.Uint64(payload[8:16])
+		binary.LittleEndian.PutUint64(payload[8:16], v^key64)
+		v = binary.LittleEndian.Uint64(payload[16:24])
+		binary.LittleEndian.PutUint64(payload[16:24], v^key64)
+		v = binary.LittleEndian.Uint64(payload[24:32])
+		binary.LittleEndian.PutUint64(payload[24:32], v^key64)
+		payload = payload[32:]
+	}
+
+	for len(payload) >= 16 {
+		v := binary.LittleEndian.Uint64(payload[:8])
+		binary.LittleEndian.PutUint64(payload[:8], v^key64)
+		v = binary.LittleEndian.Uint64(payload[8:16])
+		binary.LittleEndian.PutUint64(payload[8:16], v^key64)
+		payload = payload[16:]
+	}
+
+	for len(payload) >= 8 {
+		v := binary.LittleEndian.Uint64(payload[:8])
+		binary.LittleEndian.PutUint64(payload[:8], v^key64)
+		payload = payload[8:]
+	}
+
+	for len(payload) >= 4 {
+		v := binary.LittleEndian.Uint32(payload[:4])
+		binary.LittleEndian.PutUint32(payload[:4], v^key)
+		payload = payload[4:]
+	}
+
+	// xor remaining bytes.
+	for i := range payload {
+		payload[i] ^= byte(key)
+		key = bits.RotateLeft32(key, -8)
+	}
+	key = bits.ReverseBytes32(key)
 	return key
 }
 
