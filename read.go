@@ -1,17 +1,26 @@
 package websocket
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"strings"
+	"sync/atomic"
 )
 
 type messageReader struct {
-	ctx        context.Context
-	conn       *Conn
-	flate      bool
+	ctx         context.Context
+	conn        *Conn
+	flate       bool
+	flateReader io.Reader
+	flateBufio  *bufio.Reader
+	flateTail   strings.Reader
+	limitReader *limitReader
+	dict        *slidingWindow
+
 	fin        bool
 	payloadLen int64
 	mask       uint32
@@ -209,4 +218,50 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 		return fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
 	}
 	return nil
+}
+
+var ErrMessageTooBig = errors.New("websocket: message too big")
+
+type limitReader struct {
+	ctx   context.Context
+	c     *Conn
+	r     io.Reader
+	limit atomic.Int64
+	n     int64
+}
+
+func newLimitReader(c *Conn, limit int64) *limitReader {
+	lr := &limitReader{
+		c: c,
+	}
+	lr.limit.Store(limit)
+	return lr
+}
+
+func (lr *limitReader) reset(ctx context.Context, r io.Reader) {
+	lr.ctx = ctx
+	lr.n = lr.limit.Load()
+	lr.r = r
+}
+
+func (lr *limitReader) Read(p []byte) (int, error) {
+	if lr.n < 0 {
+		// no limit
+		return lr.r.Read(p)
+	}
+
+	if lr.n == 0 {
+		lr.c.writeClose(lr.ctx, StatusMessageTooBig, "read limit")
+		return 0, ErrMessageTooBig
+	}
+
+	if int64(len(p)) > lr.n {
+		p = p[:lr.n]
+	}
+	n, err := lr.r.Read(p)
+	lr.n -= int64(n)
+	if lr.n < 0 {
+		lr.n = 0
+	}
+	return n, err
 }

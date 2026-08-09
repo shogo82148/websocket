@@ -1,8 +1,11 @@
 package websocket
 
 import (
+	"compress/flate"
 	"fmt"
+	"io"
 	"strings"
+	"sync"
 )
 
 // CompressionMode represents the modes available to the permessage-deflate extension.
@@ -90,4 +93,90 @@ func (copts *compressionOptions) String() string {
 		b.WriteString("; server_no_context_takeover")
 	}
 	return b.String()
+}
+
+var flateReaderPool sync.Pool
+
+func getFlateReader(r io.Reader, dict []byte) io.Reader {
+	fr, ok := flateReaderPool.Get().(io.Reader)
+	if !ok {
+		return flate.NewReaderDict(r, dict)
+	}
+	fr.(flate.Resetter).Reset(r, dict)
+	return fr
+}
+
+func putFlateReader(fr io.Reader) {
+	flateReaderPool.Put(fr)
+}
+
+type slidingWindow struct {
+	buf []byte
+}
+
+var (
+	swPoolMu sync.RWMutex
+	swPool   = map[int]*sync.Pool{}
+)
+
+func slidingWindowPool(size int) *sync.Pool {
+	swPoolMu.RLock()
+	p, ok := swPool[size]
+	swPoolMu.RUnlock()
+	if ok {
+		return p
+	}
+
+	swPoolMu.Lock()
+	defer swPoolMu.Unlock()
+
+	p, ok = swPool[size]
+	if ok {
+		return p
+	}
+
+	p = &sync.Pool{
+		New: func() any {
+			return &slidingWindow{
+				buf: make([]byte, 0, size),
+			}
+		},
+	}
+	swPool[size] = p
+	return p
+}
+
+func (sw *slidingWindow) init(size int) {
+	if sw.buf != nil {
+		return
+	}
+	if size <= 0 {
+		size = 32 * 1024
+	}
+
+	p := slidingWindowPool(size)
+	sw2 := p.Get().(*slidingWindow)
+	*sw = *sw2
+}
+
+func (sw *slidingWindow) close() {
+	sw.buf = sw.buf[:0]
+	slidingWindowPool(cap(sw.buf)).Put(sw)
+}
+
+func (sw *slidingWindow) write(p []byte) {
+	if len(p) > cap(sw.buf) {
+		sw.buf = sw.buf[:cap(sw.buf)]
+		copy(sw.buf, p[len(p)-cap(sw.buf):])
+		return
+	}
+
+	left := cap(sw.buf) - len(sw.buf)
+	if left < len(p) {
+		spaceNeeded := len(p) - left
+		n := copy(sw.buf, sw.buf[spaceNeeded:])
+		sw.buf = sw.buf[:n]
+	}
+
+	sw.buf = append(sw.buf, p...)
 }

@@ -1,6 +1,9 @@
 package websocket
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestCompressionModeString(t *testing.T) {
 	tests := []struct {
@@ -75,6 +78,88 @@ func BenchmarkCompressionOptionsString(b *testing.B) {
 	}
 	b.ResetTimer()
 	for b.Loop() {
-		opts.String()
+		_ = opts.String()
+	}
+}
+
+func TestSlidingWindowInit(t *testing.T) {
+	t.Run("default size", func(t *testing.T) {
+		var sw slidingWindow
+		sw.init(0)
+
+		if len(sw.buf) != 0 {
+			t.Fatalf("len(sw.buf) = %d; want 0", len(sw.buf))
+		}
+		if cap(sw.buf) != 32*1024 {
+			t.Fatalf("cap(sw.buf) = %d; want %d", cap(sw.buf), 32*1024)
+		}
+		sw.close()
+	})
+
+	t.Run("custom size", func(t *testing.T) {
+		var sw slidingWindow
+		sw.init(1024)
+
+		if len(sw.buf) != 0 {
+			t.Fatalf("len(sw.buf) = %d; want 0", len(sw.buf))
+		}
+		if cap(sw.buf) != 1024 {
+			t.Fatalf("cap(sw.buf) = %d; want %d", cap(sw.buf), 1024)
+		}
+		sw.close()
+	})
+
+	t.Run("no reinit when already initialized", func(t *testing.T) {
+		sw := slidingWindow{buf: make([]byte, 0, 64)}
+		sw.init(1024)
+		if cap(sw.buf) != 64 {
+			t.Fatalf("cap(sw.buf) = %d; want %d", cap(sw.buf), 64)
+		}
+	})
+}
+
+func TestSlidingWindowWrite(t *testing.T) {
+	t.Run("append without overflow", func(t *testing.T) {
+		sw := slidingWindow{buf: make([]byte, 0, 8)}
+		sw.write([]byte("abc"))
+		sw.write([]byte("de"))
+
+		if got, want := sw.buf, []byte("abcde"); !bytes.Equal(got, want) {
+			t.Fatalf("sw.buf = %q; want %q", got, want)
+		}
+	})
+
+	t.Run("discard oldest when overflow", func(t *testing.T) {
+		sw := slidingWindow{buf: make([]byte, 0, 8)}
+		sw.write([]byte("abcdef"))
+		sw.write([]byte("ghij"))
+
+		if got, want := sw.buf, []byte("cdefghij"); !bytes.Equal(got, want) {
+			t.Fatalf("sw.buf = %q; want %q", got, want)
+		}
+	})
+
+	t.Run("keep tail when single write exceeds capacity", func(t *testing.T) {
+		sw := slidingWindow{buf: make([]byte, 0, 8)}
+		sw.write([]byte("abcdefghijklmnopqrstuvwxyz"))
+
+		if got, want := sw.buf, []byte("stuvwxyz"); !bytes.Equal(got, want) {
+			t.Fatalf("sw.buf = %q; want %q", got, want)
+		}
+	})
+}
+
+func TestSlidingWindowClose(t *testing.T) {
+	var sw slidingWindow
+	sw.init(16)
+	sw.write([]byte("hello world"))
+
+	sw.close()
+
+	if len(sw.buf) != 0 {
+		t.Fatalf("len(sw.buf) = %d; want 0", len(sw.buf))
+	}
+	if cap(sw.buf) != 16 {
+		t.Fatalf("cap(sw.buf) = %d; want %d", cap(sw.buf), 16)
 	}
 }
