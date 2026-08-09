@@ -35,6 +35,7 @@ func (t MessageType) String() string {
 }
 
 type Conn struct {
+	_ noCopy
 	*conn
 
 	// for synchronizing reads
