@@ -267,11 +267,6 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 		return lr.r.Read(p)
 	}
 
-	if lr.n == 0 {
-		lr.c.writeClose(lr.ctx, StatusMessageTooBig, "read limit")
-		return 0, ErrMessageTooBig
-	}
-
 	if int64(len(p)) > lr.n {
 		p = p[:lr.n]
 	}
@@ -279,6 +274,10 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 	lr.n -= int64(n)
 	if lr.n < 0 {
 		lr.n = 0
+	}
+	if lr.n == 0 {
+		lr.c.writeClose(lr.ctx, StatusMessageTooBig, "read limit")
+		return 0, ErrMessageTooBig
 	}
 	return n, err
 }
