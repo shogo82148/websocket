@@ -144,10 +144,13 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	brw.Reader.Reset(io.MultiReader(bytes.NewReader(b), conn))
 
 	return newConn(connConfig{
-		rwc:    conn,
-		client: false,
-		br:     brw.Reader,
-		bw:     brw.Writer,
+		rwc:            conn,
+		client:         false,
+		copts:          copts,
+		flateThreshold: opts.CompressionThreshold,
+
+		br: brw.Reader,
+		bw: brw.Writer,
 	}), nil
 }
 

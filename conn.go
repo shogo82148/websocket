@@ -41,10 +41,12 @@ type Conn struct {
 type conn struct {
 	_ noCopy
 
-	rwc    io.ReadWriteCloser
-	client bool
-	br     *bufio.Reader
-	bw     *bufio.Writer
+	rwc            io.ReadWriteCloser
+	client         bool
+	copts          *compressionOptions
+	flateThreshold int
+	br             *bufio.Reader
+	bw             *bufio.Writer
 
 	// for synchronizing reads
 	readerMu *mutex
@@ -70,32 +72,60 @@ type conn struct {
 }
 
 type connConfig struct {
-	rwc    io.ReadWriteCloser
-	client bool
-	br     *bufio.Reader
-	bw     *bufio.Writer
+	rwc            io.ReadWriteCloser
+	client         bool
+	copts          *compressionOptions
+	flateThreshold int
+
+	br *bufio.Reader
+	bw *bufio.Writer
 }
 
 func newConn(cfg connConfig) *Conn {
 	closed := make(chan struct{})
 	c := &Conn{
 		conn: &conn{
-			rwc:          cfg.rwc,
-			client:       cfg.client,
-			br:           cfg.br,
-			bw:           cfg.bw,
+			rwc:            cfg.rwc,
+			client:         cfg.client,
+			copts:          cfg.copts,
+			flateThreshold: cfg.flateThreshold,
+
+			br: cfg.br,
+			bw: cfg.bw,
+
 			readerMu:     newMutex(closed),
 			writerMu:     newMutex(closed),
 			writeFrameMu: newMutex(closed),
 			closed:       closed,
 		},
 	}
+
+	if c.flate() && c.flateThreshold == 0 {
+		var flateContextTakeover bool
+		if c.client {
+			flateContextTakeover = !c.copts.clientNoContextTakeover
+		} else {
+			flateContextTakeover = !c.copts.serverNoContextTakeover
+		}
+
+		if flateContextTakeover {
+			c.flateThreshold = 128
+		} else {
+			c.flateThreshold = 512
+		}
+	}
+
 	runtime.AddCleanup(c, func(c *conn) {
 		_ = c.close()
 	}, c.conn)
 	c.startReadWatcher()
 	c.startWriteWatcher()
 	return c
+}
+
+// flate returns true if the connection is using permessage-deflate compression.
+func (c *conn) flate() bool {
+	return c.copts != nil
 }
 
 // Ping sends a ping to the peer and waits for a pong.
