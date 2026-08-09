@@ -15,6 +15,18 @@ type messageWriter struct {
 	closed bool
 }
 
+func newMessageWriter(conn *Conn) *messageWriter {
+	return &messageWriter{
+		conn: conn,
+	}
+}
+
+func (w *messageWriter) reset(ctx context.Context, opCode opCode) {
+	w.ctx = ctx
+	w.opCode = opCode
+	w.closed = false
+}
+
 func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, io.ErrClosedPipe
@@ -60,11 +72,9 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 		return nil, err
 	}
 
-	return &messageWriter{
-		ctx:    ctx,
-		conn:   c,
-		opCode: opCode,
-	}, nil
+	w := c.msgWriter
+	w.reset(ctx, opCode)
+	return w, nil
 }
 
 // Write writes a message to the connection.
