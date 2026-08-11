@@ -37,22 +37,23 @@ func TestDial(t *testing.T) {
 			if req.Header.Get("Connection") != "Upgrade" {
 				t.Fatalf("Connection header = %q; want %q", req.Header.Get("Connection"), "Upgrade")
 			}
-			if req.Header.Get("Sec-WebSocket-Version") != "13" {
-				t.Fatalf("Sec-WebSocket-Version = %q; want %q", req.Header.Get("Sec-WebSocket-Version"), "13")
+			if req.Header.Get("Sec-Websocket-Version") != "13" {
+				t.Fatalf("Sec-Websocket-Version = %q; want %q", req.Header.Get("Sec-Websocket-Version"), "13")
 			}
-			if req.Header.Get("Sec-WebSocket-Protocol") != "chat, superchat" {
-				t.Fatalf("Sec-WebSocket-Protocol = %q; want %q", req.Header.Get("Sec-WebSocket-Protocol"), "chat, superchat")
+			if req.Header.Get("Sec-Websocket-Protocol") != "chat, superchat" {
+				t.Fatalf("Sec-Websocket-Protocol = %q; want %q", req.Header.Get("Sec-Websocket-Protocol"), "chat, superchat")
 			}
 
-			key := req.Header.Get("Sec-WebSocket-Key")
+			key := req.Header.Get("Sec-Websocket-Key")
 			if key == "" {
-				t.Fatal("Sec-WebSocket-Key is empty")
+				t.Fatal("Sec-Websocket-Key is empty")
 			}
 
 			h := make(http.Header)
 			h.Set("Upgrade", "websocket")
 			h.Set("Connection", "Upgrade")
-			h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+			h.Set("Sec-Websocket-Accept", acceptHeader(key))
+			h.Set("Sec-Websocket-Protocol", "superchat")
 			return &http.Response{
 				StatusCode: http.StatusSwitchingProtocols,
 				Header:     h,
@@ -83,6 +84,9 @@ func TestDial(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusSwitchingProtocols {
 			t.Fatalf("status code = %d; want %d", resp.StatusCode, http.StatusSwitchingProtocols)
+		}
+		if got := conn.Subprotocol(); got != "superchat" {
+			t.Fatalf("Conn.Subprotocol() = %q; want %q", got, "superchat")
 		}
 
 		if err := conn.CloseNow(); err != nil {
@@ -142,11 +146,11 @@ func TestDial(t *testing.T) {
 		t.Parallel()
 
 		transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-			key := req.Header.Get("Sec-WebSocket-Key")
+			key := req.Header.Get("Sec-Websocket-Key")
 			h := make(http.Header)
 			h.Set("Upgrade", "websocket")
 			h.Set("Connection", "Upgrade")
-			h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+			h.Set("Sec-Websocket-Accept", acceptHeader(key))
 
 			return &http.Response{
 				StatusCode: http.StatusSwitchingProtocols,
@@ -182,7 +186,7 @@ func TestVerifyServerResponse(t *testing.T) {
 		h := make(http.Header)
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+		h.Set("Sec-Websocket-Accept", acceptHeader(key))
 		return &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: h}
 	}
 
@@ -199,13 +203,13 @@ func TestVerifyServerResponse(t *testing.T) {
 		t.Parallel()
 
 		resp := validResponse()
-		resp.Header.Set("Sec-WebSocket-Accept", "invalid")
+		resp.Header.Set("Sec-Websocket-Accept", "invalid")
 		err := verifyServerResponse(resp, key, nil)
 		if err == nil {
-			t.Fatal("verifyServerResponse succeeded with invalid Sec-WebSocket-Accept")
+			t.Fatal("verifyServerResponse succeeded with invalid Sec-Websocket-Accept")
 		}
-		if !strings.Contains(err.Error(), "Sec-WebSocket-Accept mismatch") {
-			t.Fatalf("error = %q; want to contain %q", err, "Sec-WebSocket-Accept mismatch")
+		if !strings.Contains(err.Error(), "Sec-Websocket-Accept mismatch") {
+			t.Fatalf("error = %q; want to contain %q", err, "Sec-Websocket-Accept mismatch")
 		}
 	})
 
@@ -236,6 +240,28 @@ func TestVerifyServerResponse(t *testing.T) {
 			t.Fatalf("error = %q; want to be %v", err, errConnectionHeaderNotUpgrade)
 		}
 	})
+
+	t.Run("unsupported subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Protocol", "video")
+		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat"}})
+		if err == nil || !strings.Contains(err.Error(), "unsupported subprotocol") {
+			t.Fatalf("error = %v; want unsupported subprotocol error", err)
+		}
+	})
+
+	t.Run("multiple selected subprotocols", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Protocol", "chat, superchat")
+		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat", "superchat"}})
+		if err == nil || !strings.Contains(err.Error(), "invalid Sec-Websocket-Protocol") {
+			t.Fatalf("error = %v; want invalid subprotocol response error", err)
+		}
+	})
 }
 
 func TestHandshakeRequest(t *testing.T) {
@@ -254,8 +280,8 @@ func TestHandshakeRequest(t *testing.T) {
 			if req.Header.Get("Connection") != "Upgrade" {
 				t.Fatalf("Connection header = %q; want %q", req.Header.Get("Connection"), "Upgrade")
 			}
-			if req.Header.Get("Sec-WebSocket-Key") != "fixed-key" {
-				t.Fatalf("Sec-WebSocket-Key = %q; want %q", req.Header.Get("Sec-WebSocket-Key"), "fixed-key")
+			if req.Header.Get("Sec-Websocket-Key") != "fixed-key" {
+				t.Fatalf("Sec-Websocket-Key = %q; want %q", req.Header.Get("Sec-Websocket-Key"), "fixed-key")
 			}
 
 			return &http.Response{

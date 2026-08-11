@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -107,7 +108,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		defer cancel()
 	}
 
-	// generate a random Sec-WebSocket-Key
+	// generate a random Sec-Websocket-Key
 	var buf [16]byte
 	rand.Read(buf[:])
 	secWebSocketKey := base64.StdEncoding.EncodeToString(buf[:])
@@ -120,6 +121,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	if err := verifyServerResponse(resp, secWebSocketKey, opts); err != nil {
 		return nil, readResponseBody(resp), err
 	}
+	subprotocol := resp.Header.Get("Sec-Websocket-Protocol")
 
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
@@ -127,10 +129,11 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	}
 
 	return newConn(connConfig{
-		rwc:    rwc,
-		client: true,
-		br:     bufio.NewReader(rwc),
-		bw:     bufio.NewWriter(rwc),
+		rwc:         rwc,
+		client:      true,
+		subprotocol: subprotocol,
+		br:          bufio.NewReader(rwc),
+		bw:          bufio.NewWriter(rwc),
 	}), resp, nil
 }
 
@@ -175,13 +178,13 @@ func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *Dial
 	maps.Copy(req.Header, opts.HTTPHeader)
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Sec-WebSocket-Version", "13")
-	req.Header.Set("Sec-WebSocket-Key", secWebSocketKey)
+	req.Header.Set("Sec-Websocket-Version", "13")
+	req.Header.Set("Sec-Websocket-Key", secWebSocketKey)
 	if opts.Host != "" {
 		req.Host = opts.Host
 	}
 	if len(opts.Subprotocols) > 0 {
-		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(opts.Subprotocols, ", "))
+		req.Header.Set("Sec-Websocket-Protocol", strings.Join(opts.Subprotocols, ", "))
 	}
 
 	// send the HTTP request
@@ -203,8 +206,22 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 		return errConnectionHeaderNotUpgrade
 	}
 	expectedAccept := acceptHeader(secWebSocketKey)
-	if got := resp.Header.Get("Sec-WebSocket-Accept"); got != expectedAccept {
-		return fmt.Errorf("websocket: Sec-WebSocket-Accept mismatch: got %q, want %q", got, expectedAccept)
+	if got := resp.Header.Get("Sec-Websocket-Accept"); got != expectedAccept {
+		return fmt.Errorf("websocket: Sec-Websocket-Accept mismatch: got %q, want %q", got, expectedAccept)
 	}
-	return nil
+	protocols := resp.Header.Values("Sec-Websocket-Protocol")
+	if len(protocols) == 0 {
+		return nil
+	}
+	if len(protocols) != 1 || strings.Contains(protocols[0], ",") || strings.TrimSpace(protocols[0]) != protocols[0] || protocols[0] == "" {
+		return fmt.Errorf("websocket: invalid Sec-Websocket-Protocol response: %q", protocols)
+	}
+	var offered []string
+	if opts != nil {
+		offered = opts.Subprotocols
+	}
+	if slices.Contains(offered, protocols[0]) {
+		return nil
+	}
+	return fmt.Errorf("websocket: server selected unsupported subprotocol %q", protocols[0])
 }

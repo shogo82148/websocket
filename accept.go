@@ -10,6 +10,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -122,6 +123,12 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 
 	h := w.Header()
 
+	// negotiate the subprotocol. The client's order expresses its preference.
+	subprotocol := selectSubprotocol(r.Header, opts.Subprotocols)
+	if subprotocol != "" {
+		h.Set("Sec-Websocket-Protocol", subprotocol)
+	}
+
 	// negotiate extensions
 	copts, ok := selectDeflate(websocketExtensions(r.Header), opts.CompressionMode)
 	if ok {
@@ -146,12 +153,22 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	return newConn(connConfig{
 		rwc:            conn,
 		client:         false,
+		subprotocol:    subprotocol,
 		copts:          copts,
 		flateThreshold: opts.CompressionThreshold,
 
 		br: brw.Reader,
 		bw: brw.Writer,
 	}), nil
+}
+
+func selectSubprotocol(h http.Header, supported []string) string {
+	for offered := range headerTokens(h, "Sec-Websocket-Protocol") {
+		if slices.Contains(supported, offered) {
+			return offered
+		}
+	}
+	return ""
 }
 
 func headerContainsTokenIgnoreCase(h http.Header, key, token string) bool {
@@ -249,20 +266,20 @@ func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOp
 }
 
 func getWebSocketKey(r *http.Request) (string, error) {
-	keys := r.Header.Values("Sec-WebSocket-Key")
+	keys := r.Header.Values("Sec-Websocket-Key")
 	if len(keys) == 0 {
-		return "", errors.New("websocket: missing Sec-WebSocket-Key header")
+		return "", errors.New("websocket: missing Sec-Websocket-Key header")
 	}
 	if len(keys) > 1 {
-		return "", errors.New("websocket: multiple Sec-WebSocket-Key headers")
+		return "", errors.New("websocket: multiple Sec-Websocket-Key headers")
 	}
 	key := strings.TrimSpace(keys[0])
 	data, err := base64.StdEncoding.DecodeString(key)
 	if err != nil {
-		return "", fmt.Errorf("websocket: invalid Sec-WebSocket-Key: %v", err)
+		return "", fmt.Errorf("websocket: invalid Sec-Websocket-Key: %v", err)
 	}
 	if len(data) != 16 {
-		return "", fmt.Errorf("websocket: invalid Sec-WebSocket-Key length: %d", len(data))
+		return "", fmt.Errorf("websocket: invalid Sec-Websocket-Key length: %d", len(data))
 	}
 	return key, nil
 }
