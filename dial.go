@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -219,10 +220,8 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 	if opts != nil {
 		offered = opts.Subprotocols
 	}
-	for _, protocol := range offered {
-		if protocols[0] == protocol {
-			return nil
-		}
+	if slices.Contains(offered, protocols[0]) {
+		return nil
 	}
 	return fmt.Errorf("websocket: server selected unsupported subprotocol %q", protocols[0])
 }
