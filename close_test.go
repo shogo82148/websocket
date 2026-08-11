@@ -168,14 +168,17 @@ func TestParseClosePayload(t *testing.T) {
 
 func TestConnWaitCloseHandshake(t *testing.T) {
 	t.Run("accepts a close frame", func(t *testing.T) {
+		ctx := t.Context()
 		conn, _ := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
 
-		if err := conn.waitCloseHandshake(t.Context()); err != nil {
-			t.Fatalf("waitCloseHandshake failed: %v", err)
+		err := conn.waitCloseHandshake(ctx)
+		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusNormalClosure {
+			t.Fatalf("waitCloseHandshake error = %v; want CloseError with StatusNormalClosure", err)
 		}
 	})
 
 	t.Run("discards data messages before the close frame", func(t *testing.T) {
+		ctx := t.Context()
 		input := []byte{
 			0x81, 0x05, 'h', 'e', 'l', 'l', 'o',
 			0x82, 0x03, 0x01, 0x02, 0x03,
@@ -183,15 +186,17 @@ func TestConnWaitCloseHandshake(t *testing.T) {
 		}
 		conn, _ := newCloseTestConn(t, input)
 
-		if err := conn.waitCloseHandshake(t.Context()); err != nil {
-			t.Fatalf("waitCloseHandshake failed: %v", err)
+		err := conn.waitCloseHandshake(ctx)
+		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusNormalClosure {
+			t.Fatalf("waitCloseHandshake error = %v; want CloseError with StatusNormalClosure", err)
 		}
 	})
 
 	t.Run("returns an error when the transport closes before a close frame", func(t *testing.T) {
+		ctx := t.Context()
 		conn, _ := newCloseTestConn(t, nil)
 
-		err := conn.waitCloseHandshake(t.Context())
+		err := conn.waitCloseHandshake(ctx)
 		if !errors.Is(err, io.EOF) {
 			t.Fatalf("waitCloseHandshake error = %v; want %v", err, io.EOF)
 		}
@@ -216,6 +221,20 @@ func TestConnWaitCloseHandshake(t *testing.T) {
 }
 
 func TestConnCloseHandshake(t *testing.T) {
+	t.Run("returns an error when the peer responds with a different status", func(t *testing.T) {
+		ctx := t.Context()
+		conn, _ := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe9})
+
+		err := conn.closeHandshake(ctx, StatusNormalClosure, "")
+		ce, ok := errors.AsType[CloseError](err)
+		if !ok {
+			t.Fatalf("closeHandshake error = %v; want CloseError", err)
+		}
+		if ce.Code != StatusGoingAway {
+			t.Fatalf("closeHandshake status = %v; want %v", ce.Code, StatusGoingAway)
+		}
+	})
+
 	t.Run("sends close, receives close, and closes the transport", func(t *testing.T) {
 		conn, rwc := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
 

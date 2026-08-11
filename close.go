@@ -174,6 +174,9 @@ func (c *Conn) closeHandshake(ctx context.Context, code StatusCode, reason strin
 		return err
 	}
 	if err := c.waitCloseHandshake(ctx); err != nil {
+		if ce, ok := errors.AsType[CloseError](err); ok && ce.Code == code {
+			return nil
+		}
 		return err
 	}
 	return nil
