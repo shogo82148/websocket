@@ -10,6 +10,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -163,10 +164,8 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 
 func selectSubprotocol(h http.Header, supported []string) string {
 	for offered := range headerTokens(h, "Sec-Websocket-Protocol") {
-		for _, protocol := range supported {
-			if offered == protocol {
-				return protocol
-			}
+		if slices.Contains(supported, offered) {
+			return offered
 		}
 	}
 	return ""
