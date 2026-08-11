@@ -1,9 +1,50 @@
 package websocket
 
 import (
+	"bufio"
 	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+type closeTrackingRWC struct {
+	r, w       bytes.Buffer
+	closeCount atomic.Int32
+}
+
+func (rw *closeTrackingRWC) Read(p []byte) (int, error) {
+	return rw.r.Read(p)
+}
+
+func (rw *closeTrackingRWC) Write(p []byte) (int, error) {
+	return rw.w.Write(p)
+}
+
+func (rw *closeTrackingRWC) Close() error {
+	rw.closeCount.Add(1)
+	return nil
+}
+
+func newCloseTestConn(t *testing.T, input []byte) (*Conn, *closeTrackingRWC) {
+	t.Helper()
+
+	rwc := new(closeTrackingRWC)
+	if _, err := rwc.r.Write(input); err != nil {
+		t.Fatalf("failed to prepare test input: %v", err)
+	}
+	c := newConn(connConfig{
+		rwc:    rwc,
+		client: true,
+		br:     bufio.NewReader(rwc),
+		bw:     bufio.NewWriter(rwc),
+	})
+	return c, rwc
+}
 
 func TestCloseError(t *testing.T) {
 	t.Parallel()
@@ -123,4 +164,167 @@ func TestParseClosePayload(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConnWaitCloseHandshake(t *testing.T) {
+	t.Run("accepts a close frame", func(t *testing.T) {
+		conn, _ := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
+
+		if err := conn.waitCloseHandshake(t.Context()); err != nil {
+			t.Fatalf("waitCloseHandshake failed: %v", err)
+		}
+	})
+
+	t.Run("discards data messages before the close frame", func(t *testing.T) {
+		input := []byte{
+			0x81, 0x05, 'h', 'e', 'l', 'l', 'o',
+			0x82, 0x03, 0x01, 0x02, 0x03,
+			0x88, 0x02, 0x03, 0xe8,
+		}
+		conn, _ := newCloseTestConn(t, input)
+
+		if err := conn.waitCloseHandshake(t.Context()); err != nil {
+			t.Fatalf("waitCloseHandshake failed: %v", err)
+		}
+	})
+
+	t.Run("returns an error when the transport closes before a close frame", func(t *testing.T) {
+		conn, _ := newCloseTestConn(t, nil)
+
+		err := conn.waitCloseHandshake(t.Context())
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("waitCloseHandshake error = %v; want %v", err, io.EOF)
+		}
+	})
+
+	t.Run("honors context cancellation", func(t *testing.T) {
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+
+		err := conn.waitCloseHandshake(ctx)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("waitCloseHandshake error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
+}
+
+func TestConnCloseHandshake(t *testing.T) {
+	t.Run("sends close, receives close, and closes the transport", func(t *testing.T) {
+		conn, rwc := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
+
+		if err := conn.Close(StatusNormalClosure, ""); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+		if got := rwc.closeCount.Load(); got != 1 {
+			t.Fatalf("underlying Close call count = %d; want 1", got)
+		}
+
+		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
+		h, err := readFrameHeader(br)
+		if err != nil {
+			t.Fatalf("failed to read sent close frame: %v", err)
+		}
+		if !h.fin || h.opCode != opClose || !h.mask {
+			t.Fatalf("sent frame header = %+v; want final, masked close frame", h)
+		}
+		payload := make([]byte, h.payloadLen)
+		if _, err := io.ReadFull(br, payload); err != nil {
+			t.Fatalf("failed to read sent close payload: %v", err)
+		}
+		maskFramePayload(payload, h.maskKey)
+		ce, err := parseClosePayload(payload)
+		if err != nil {
+			t.Fatalf("sent close payload is invalid: %v", err)
+		}
+		if ce != (CloseError{Code: StatusNormalClosure}) {
+			t.Fatalf("sent close = %+v; want normal closure without reason", ce)
+		}
+	})
+
+	t.Run("responds when the peer initiates the handshake", func(t *testing.T) {
+		conn, rwc := newCloseTestConn(t, []byte{0x88, 0x05, 0x03, 0xe9, 'b', 'y', 'e'})
+
+		_, _, err := conn.Reader(t.Context())
+		var ce CloseError
+		if !errors.As(err, &ce) {
+			t.Fatalf("Reader error = %v; want CloseError", err)
+		}
+		if ce != (CloseError{Code: StatusGoingAway, Reason: "bye"}) {
+			t.Fatalf("received close = %+v; want going away with reason", ce)
+		}
+
+		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
+		h, err := readFrameHeader(br)
+		if err != nil {
+			t.Fatalf("peer-initiated close produced no response frame: %v", err)
+		}
+		if h.opCode != opClose {
+			t.Fatalf("response opcode = %v; want close", h.opCode)
+		}
+		payload := make([]byte, h.payloadLen)
+		if _, err := io.ReadFull(br, payload); err != nil {
+			t.Fatalf("failed to read response close payload: %v", err)
+		}
+		if h.mask {
+			maskFramePayload(payload, h.maskKey)
+		}
+		got, err := parseClosePayload(payload)
+		if err != nil {
+			t.Fatalf("response close payload is invalid: %v", err)
+		}
+		if got != ce {
+			t.Fatalf("response close = %+v; want echo of %+v", got, ce)
+		}
+	})
+
+	t.Run("works while CloseRead owns the reader", func(t *testing.T) {
+		local, peer := net.Pipe()
+		defer peer.Close()
+		conn := newConn(connConfig{
+			rwc:    local,
+			client: true,
+			br:     bufio.NewReader(local),
+			bw:     bufio.NewWriter(local),
+		})
+		closeReadCtx := conn.CloseRead(context.Background())
+
+		peerErr := make(chan error, 1)
+		go func() {
+			br := bufio.NewReader(peer)
+			h, err := readFrameHeader(br)
+			if err != nil {
+				peerErr <- err
+				return
+			}
+			if h.opCode != opClose {
+				peerErr <- errors.New("received frame is not a close frame")
+				return
+			}
+			if _, err := io.CopyN(io.Discard, br, h.payloadLen); err != nil {
+				peerErr <- err
+				return
+			}
+			_, err = peer.Write([]byte{0x88, 0x02, 0x03, 0xe8})
+			peerErr <- err
+		}()
+
+		if err := conn.Close(StatusNormalClosure, ""); err != nil {
+			t.Fatalf("Close failed while CloseRead was active: %v", err)
+		}
+		if err := <-peerErr; err != nil {
+			t.Fatalf("peer failed during close handshake: %v", err)
+		}
+		select {
+		case <-closeReadCtx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("CloseRead context was not canceled after close handshake")
+		}
+	})
 }
