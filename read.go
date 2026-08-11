@@ -296,6 +296,9 @@ func (fr *flateReader) reset(r io.Reader) {
 }
 
 func (fr *flateReader) Read(p []byte) (int, error) {
+	if fr.flateReader == nil {
+		return 0, net.ErrClosed
+	}
 	n, err := fr.flateReader.Read(p)
 	if errors.Is(err, io.EOF) {
 		fr.close()
