@@ -53,6 +53,7 @@ func TestDial(t *testing.T) {
 			h.Set("Upgrade", "websocket")
 			h.Set("Connection", "Upgrade")
 			h.Set("Sec-WebSocket-Accept", acceptHeader(key))
+			h.Set("Sec-WebSocket-Protocol", "superchat")
 			return &http.Response{
 				StatusCode: http.StatusSwitchingProtocols,
 				Header:     h,
@@ -83,6 +84,9 @@ func TestDial(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusSwitchingProtocols {
 			t.Fatalf("status code = %d; want %d", resp.StatusCode, http.StatusSwitchingProtocols)
+		}
+		if got := conn.Subprotocol(); got != "superchat" {
+			t.Fatalf("Conn.Subprotocol() = %q; want %q", got, "superchat")
 		}
 
 		if err := conn.CloseNow(); err != nil {
@@ -234,6 +238,28 @@ func TestVerifyServerResponse(t *testing.T) {
 		}
 		if !errors.Is(err, errConnectionHeaderNotUpgrade) {
 			t.Fatalf("error = %q; want to be %v", err, errConnectionHeaderNotUpgrade)
+		}
+	})
+
+	t.Run("unsupported subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-WebSocket-Protocol", "video")
+		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat"}})
+		if err == nil || !strings.Contains(err.Error(), "unsupported subprotocol") {
+			t.Fatalf("error = %v; want unsupported subprotocol error", err)
+		}
+	})
+
+	t.Run("multiple selected subprotocols", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-WebSocket-Protocol", "chat, superchat")
+		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat", "superchat"}})
+		if err == nil || !strings.Contains(err.Error(), "invalid Sec-WebSocket-Protocol") {
+			t.Fatalf("error = %v; want invalid subprotocol response error", err)
 		}
 	})
 }

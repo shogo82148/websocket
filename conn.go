@@ -38,6 +38,9 @@ type Conn struct {
 	_ noCopy
 	*conn
 
+	// subprotocol is the subprotocol negotiated during the handshake.
+	subprotocol string
+
 	// for handling compression
 	copts          *compressionOptions
 	flateThreshold int
@@ -81,6 +84,7 @@ type conn struct {
 type connConfig struct {
 	rwc            io.ReadWriteCloser
 	client         bool
+	subprotocol    string
 	copts          *compressionOptions
 	flateThreshold int
 
@@ -100,6 +104,7 @@ func newConn(cfg connConfig) *Conn {
 
 			closed: closed,
 		},
+		subprotocol:    cfg.subprotocol,
 		copts:          cfg.copts,
 		flateThreshold: cfg.flateThreshold,
 
@@ -151,7 +156,7 @@ func (c *Conn) Ping(ctx context.Context) error {
 // Subprotocol returns the negotiated subprotocol.
 // An empty string means the default protocol.
 func (c *Conn) Subprotocol() string {
-	return ""
+	return c.subprotocol
 }
 
 func (c *conn) startReadWatcher() {

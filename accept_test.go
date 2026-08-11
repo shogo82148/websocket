@@ -54,6 +54,44 @@ func TestAccept(t *testing.T) {
 		}
 	})
 
+	t.Run("negotiates subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		selected := make(chan string, 1)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := Accept(w, r, &AcceptOptions{Subprotocols: []string{"superchat", "chat"}})
+			if err != nil {
+				t.Errorf("Accept failed: %v", err)
+				return
+			}
+			selected <- conn.Subprotocol()
+			conn.CloseNow()
+		}))
+		defer ts.Close()
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL, nil)
+		if err != nil {
+			t.Fatalf("http.NewRequestWithContext failed: %v", err)
+		}
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		req.Header.Set("Sec-WebSocket-Protocol", "unknown, chat, superchat")
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("http.Client.Do failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "chat" {
+			t.Fatalf("Sec-WebSocket-Protocol = %q; want %q", got, "chat")
+		}
+		if got := <-selected; got != "chat" {
+			t.Fatalf("Conn.Subprotocol() = %q; want %q", got, "chat")
+		}
+	})
+
 	t.Run("invalid method", func(t *testing.T) {
 		t.Parallel()
 

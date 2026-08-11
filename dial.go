@@ -120,6 +120,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	if err := verifyServerResponse(resp, secWebSocketKey, opts); err != nil {
 		return nil, readResponseBody(resp), err
 	}
+	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
 
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
@@ -127,10 +128,11 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	}
 
 	return newConn(connConfig{
-		rwc:    rwc,
-		client: true,
-		br:     bufio.NewReader(rwc),
-		bw:     bufio.NewWriter(rwc),
+		rwc:         rwc,
+		client:      true,
+		subprotocol: subprotocol,
+		br:          bufio.NewReader(rwc),
+		bw:          bufio.NewWriter(rwc),
 	}), resp, nil
 }
 
@@ -206,5 +208,21 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 	if got := resp.Header.Get("Sec-WebSocket-Accept"); got != expectedAccept {
 		return fmt.Errorf("websocket: Sec-WebSocket-Accept mismatch: got %q, want %q", got, expectedAccept)
 	}
-	return nil
+	protocols := resp.Header.Values("Sec-WebSocket-Protocol")
+	if len(protocols) == 0 {
+		return nil
+	}
+	if len(protocols) != 1 || strings.Contains(protocols[0], ",") || strings.TrimSpace(protocols[0]) != protocols[0] || protocols[0] == "" {
+		return fmt.Errorf("websocket: invalid Sec-WebSocket-Protocol response: %q", protocols)
+	}
+	var offered []string
+	if opts != nil {
+		offered = opts.Subprotocols
+	}
+	for _, protocol := range offered {
+		if protocols[0] == protocol {
+			return nil
+		}
+	}
+	return fmt.Errorf("websocket: server selected unsupported subprotocol %q", protocols[0])
 }

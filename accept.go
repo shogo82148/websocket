@@ -122,6 +122,12 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 
 	h := w.Header()
 
+	// negotiate the subprotocol. The client's order expresses its preference.
+	subprotocol := selectSubprotocol(r.Header, opts.Subprotocols)
+	if subprotocol != "" {
+		h.Set("Sec-WebSocket-Protocol", subprotocol)
+	}
+
 	// negotiate extensions
 	copts, ok := selectDeflate(websocketExtensions(r.Header), opts.CompressionMode)
 	if ok {
@@ -146,12 +152,24 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	return newConn(connConfig{
 		rwc:            conn,
 		client:         false,
+		subprotocol:    subprotocol,
 		copts:          copts,
 		flateThreshold: opts.CompressionThreshold,
 
 		br: brw.Reader,
 		bw: brw.Writer,
 	}), nil
+}
+
+func selectSubprotocol(h http.Header, supported []string) string {
+	for offered := range headerTokens(h, "Sec-WebSocket-Protocol") {
+		for _, protocol := range supported {
+			if offered == protocol {
+				return protocol
+			}
+		}
+	}
+	return ""
 }
 
 func headerContainsTokenIgnoreCase(h http.Header, key, token string) bool {
