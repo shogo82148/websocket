@@ -10,7 +10,8 @@ import (
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionNoContextTakeover,
+			CompressionMode:      websocket.CompressionNoContextTakeover,
+			CompressionThreshold: 1,
 		})
 		if err != nil {
 			return

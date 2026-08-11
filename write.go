@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 )
@@ -16,6 +15,10 @@ type messageWriter struct {
 	conn   *Conn
 	opCode opCode
 	closed bool
+	flate  bool
+
+	trimWriter  *trimLastFourBytesWriter
+	flateWriter *flate.Writer
 }
 
 func newMessageWriter(conn *Conn) *messageWriter {
@@ -28,14 +31,56 @@ func (w *messageWriter) reset(ctx context.Context, opCode opCode) {
 	w.ctx = ctx
 	w.opCode = opCode
 	w.closed = false
+	w.flate = false
+	if w.trimWriter != nil {
+		w.trimWriter.reset()
+	}
+}
+
+func (w *messageWriter) ensureFlate() error {
+	if w.trimWriter == nil {
+		w.trimWriter = &trimLastFourBytesWriter{
+			w: writerFunc(w.write),
+		}
+	}
+	if w.flateWriter == nil {
+		flateWriter, err := flate.NewWriter(w.trimWriter, flate.DefaultCompression)
+		if err != nil {
+			return err
+		}
+		w.flateWriter = flateWriter
+	}
+	w.flate = true
+	return nil
+}
+
+func (w *messageWriter) flateContextTakeover() bool {
+	if w.conn.client {
+		return !w.conn.copts.clientNoContextTakeover
+	}
+	return !w.conn.copts.serverNoContextTakeover
 }
 
 func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, io.ErrClosedPipe
 	}
-	err := w.conn.writeFrame(w.ctx, false, false, w.opCode, p)
-	if err != nil {
+
+	// Compression can only be selected for the first fragment because RSV1 is
+	// only valid on the first frame of a compressed message.
+	if w.conn.flate() && w.opCode != opContinuation && len(p) >= w.conn.flateThreshold {
+		if err := w.ensureFlate(); err != nil {
+			return 0, err
+		}
+	}
+	if w.flate {
+		return w.flateWriter.Write(p)
+	}
+	return w.write(p)
+}
+
+func (w *messageWriter) write(p []byte) (int, error) {
+	if err := w.conn.writeFrame(w.ctx, false, w.flate, w.opCode, p); err != nil {
 		return 0, err
 	}
 	w.opCode = opContinuation
@@ -47,12 +92,28 @@ func (w *messageWriter) Close() error {
 		return io.ErrClosedPipe
 	}
 	w.closed = true
-	err := w.conn.writeFrame(w.ctx, true, false, w.opCode, nil)
+
+	if w.flate {
+		if err := w.flateWriter.Flush(); err != nil {
+			w.conn.writerMu.unlock()
+			return err
+		}
+	}
+	err := w.conn.writeFrame(w.ctx, true, w.flate, w.opCode, nil)
+	if w.flate && !w.flateContextTakeover() {
+		w.flateWriter = nil
+	}
 	w.conn.writerMu.unlock()
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) {
+	return f(p)
 }
 
 // Writer returns a writer bounded by the context that will write a WebSocket message of type dataType to the connection.
@@ -137,13 +198,9 @@ func (c *Conn) writeFrame(ctx context.Context, fin, flate bool, opCode opCode, d
 	}
 	defer c.finishWrite()
 
-	if flate && (opCode != opText && opCode != opBinary) {
-		return errors.New("websocket: cannot compress non-text/binary frame")
-	}
-
 	h := frameHeader{
 		fin:        fin,
-		rsv1:       flate,
+		rsv1:       flate && (opCode == opText || opCode == opBinary),
 		opCode:     opCode,
 		mask:       c.client,
 		payloadLen: int64(len(data)),

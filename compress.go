@@ -104,6 +104,49 @@ const deflateMessageTail = "\x00\x00\xff\xff" + // WebSocket Synchronized Paddin
 	"\x03\x00" // End-of-stream marker (BFINAL=1)
 var deflateMessageTailBytes = []byte{0x00, 0x00, 0xff, 0xff}
 
+// trimLastFourBytesWriter holds back the permessage-deflate tail emitted by a
+// sync flush. RFC 7692 requires that tail to be omitted from the wire.
+type trimLastFourBytesWriter struct {
+	w    io.Writer
+	tail []byte
+}
+
+func (tw *trimLastFourBytesWriter) reset() {
+	tw.tail = tw.tail[:0]
+}
+
+func (tw *trimLastFourBytesWriter) Write(p []byte) (int, error) {
+	const tailLen = 4
+
+	if tw.tail == nil {
+		tw.tail = make([]byte, 0, tailLen)
+	}
+
+	extra := len(tw.tail) + len(p) - tailLen
+	if extra <= 0 {
+		tw.tail = append(tw.tail, p...)
+		return len(p), nil
+	}
+
+	fromTail := min(extra, len(tw.tail))
+	if fromTail > 0 {
+		if _, err := tw.w.Write(tw.tail[:fromTail]); err != nil {
+			return 0, err
+		}
+		copy(tw.tail, tw.tail[fromTail:])
+		tw.tail = tw.tail[:len(tw.tail)-fromTail]
+	}
+
+	if len(p) <= tailLen {
+		tw.tail = append(tw.tail, p...)
+		return len(p), nil
+	}
+
+	tw.tail = append(tw.tail, p[len(p)-tailLen:]...)
+	n, err := tw.w.Write(p[:len(p)-tailLen])
+	return n + tailLen, err
+}
+
 var flateReaderPool sync.Pool
 
 func getFlateReader(r io.Reader, dict []byte) io.Reader {

@@ -159,6 +159,88 @@ func TestConnWriter(t *testing.T) {
 			t.Fatalf("Close error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+
+	t.Run("writes a compressed message when the first write reaches the threshold", func(t *testing.T) {
+		ctx := t.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 5,
+		})
+
+		w, err := conn.Writer(ctx, MessageText)
+		if err != nil {
+			t.Fatalf("Writer failed: %v", err)
+		}
+		if _, err := w.Write([]byte("hello")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+		if _, err := w.Write([]byte(" world")); err != nil {
+			t.Fatalf("second Write failed: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+
+		if got := rwc.w.Bytes()[0] & 0x40; got == 0 {
+			t.Fatal("first frame does not have RSV1 set")
+		}
+
+		peerRWC := new(testReadWriteCloser)
+		peerRWC.r.Write(rwc.w.Bytes())
+		peer := newConn(connConfig{
+			rwc:    peerRWC,
+			client: true,
+			br:     bufio.NewReader(peerRWC),
+			bw:     bufio.NewWriter(peerRWC),
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+		})
+		_, got, err := peer.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if string(got) != "hello world" {
+			t.Fatalf("Read returned %q; want %q", got, "hello world")
+		}
+	})
+
+	t.Run("does not start compression after the first fragment", func(t *testing.T) {
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc:            rwc,
+			br:             bufio.NewReader(rwc),
+			bw:             bufio.NewWriter(rwc),
+			copts:          new(compressionOptions),
+			flateThreshold: 5,
+		})
+
+		w, err := conn.Writer(t.Context(), MessageText)
+		if err != nil {
+			t.Fatalf("Writer failed: %v", err)
+		}
+		if _, err := w.Write([]byte("tiny")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+		if _, err := w.Write([]byte("this write is over the threshold")); err != nil {
+			t.Fatalf("second Write failed: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+
+		if got := rwc.w.Bytes()[0] & 0x40; got != 0 {
+			t.Fatal("first frame unexpectedly has RSV1 set")
+		}
+	})
 }
 
 func TestConnWrite(t *testing.T) {
