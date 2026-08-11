@@ -245,6 +245,7 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 			c.writeClose(ctx, StatusProtocolError, "received invalid close payload")
 			return err
 		}
+		c.closeReceived.Store(&ce)
 		if err := c.writeClose(ctx, ce.Code, ce.Reason); err != nil {
 			return err
 		}

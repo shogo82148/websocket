@@ -158,6 +158,9 @@ func (c *Conn) Close(code StatusCode, reason string) error {
 	if handshakeErr != nil {
 		return handshakeErr
 	}
+	if errors.Is(closeErr, net.ErrClosed) {
+		return nil
+	}
 	return closeErr
 }
 
@@ -177,6 +180,9 @@ func (c *Conn) closeHandshake(ctx context.Context, code StatusCode, reason strin
 	}
 	if err := c.waitCloseHandshake(ctx); err != nil {
 		if ce, ok := errors.AsType[CloseError](err); ok && ce.Code == code {
+			return nil
+		}
+		if ce := c.closeReceived.Load(); ce != nil && ce.Code == code {
 			return nil
 		}
 		return err
