@@ -30,8 +30,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -49,8 +49,8 @@ func TestAccept(t *testing.T) {
 		if resp.Header.Get("Connection") != "Upgrade" {
 			t.Errorf("unexpected Connection header: got %q, want %q", resp.Header.Get("Connection"), "Upgrade")
 		}
-		if resp.Header.Get("Sec-WebSocket-Accept") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
-			t.Errorf("unexpected Sec-WebSocket-Accept header: got %q, want %q", resp.Header.Get("Sec-WebSocket-Accept"), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+		if resp.Header.Get("Sec-Websocket-Accept") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+			t.Errorf("unexpected Sec-Websocket-Accept header: got %q, want %q", resp.Header.Get("Sec-Websocket-Accept"), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
 		}
 	})
 
@@ -75,17 +75,17 @@ func TestAccept(t *testing.T) {
 		}
 		req.Header.Set("Upgrade", "websocket")
 		req.Header.Set("Connection", "Upgrade")
-		req.Header.Set("Sec-WebSocket-Version", "13")
-		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		req.Header.Set("Sec-WebSocket-Protocol", "unknown, chat, superchat")
+		req.Header.Set("Sec-Websocket-Version", "13")
+		req.Header.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		req.Header.Set("Sec-Websocket-Protocol", "unknown, chat, superchat")
 
 		resp, err := ts.Client().Do(req)
 		if err != nil {
 			t.Fatalf("http.Client.Do failed: %v", err)
 		}
 		defer resp.Body.Close()
-		if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "chat" {
-			t.Fatalf("Sec-WebSocket-Protocol = %q; want %q", got, "chat")
+		if got := resp.Header.Get("Sec-Websocket-Protocol"); got != "chat" {
+			t.Fatalf("Sec-Websocket-Protocol = %q; want %q", got, "chat")
 		}
 		if got := <-selected; got != "chat" {
 			t.Fatalf("Conn.Subprotocol() = %q; want %q", got, "chat")
@@ -111,8 +111,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -145,8 +145,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		// h.Set("Upgrade", "websocket") // omit to simulate missing header
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -185,8 +185,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		// h.Set("Connection", "Upgrade") // omit to simulate missing header
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -225,8 +225,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "12")                   // invalid version
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "12")                   // invalid version
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -238,8 +238,8 @@ func TestAccept(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 		}
-		if resp.Header.Get("Sec-WebSocket-Version") != "13" {
-			t.Errorf("unexpected Sec-WebSocket-Version header: got %q, want %q", resp.Header.Get("Sec-WebSocket-Version"), "13")
+		if resp.Header.Get("Sec-Websocket-Version") != "13" {
+			t.Errorf("unexpected Sec-Websocket-Version header: got %q, want %q", resp.Header.Get("Sec-Websocket-Version"), "13")
 		}
 	})
 
@@ -262,8 +262,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		// h.Set("Sec-WebSocket-Key", "") // omit to simulate missing key
+		h.Set("Sec-Websocket-Version", "13")
+		// h.Set("Sec-Websocket-Key", "") // omit to simulate missing key
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -296,9 +296,9 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Add("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Add("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Add("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Add("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -331,8 +331,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Add("Sec-WebSocket-Key", "!!invalid-base64!!") // invalid base64
+		h.Set("Sec-Websocket-Version", "13")
+		h.Add("Sec-Websocket-Key", "!!invalid-base64!!") // invalid base64
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -365,8 +365,8 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Add("Sec-WebSocket-Key", "c2hvcnQ=") // short key
+		h.Set("Sec-Websocket-Version", "13")
+		h.Add("Sec-Websocket-Key", "c2hvcnQ=") // short key
 		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
@@ -403,10 +403,10 @@ func TestAccept(t *testing.T) {
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Sec-WebSocket-Version", "13")
-		h.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 		h.Set("Origin", "http://example.com")
-		h.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+		h.Set("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits")
 
 		resp, err := ts.Client().Do(req)
 		if err != nil {
@@ -414,8 +414,8 @@ func TestAccept(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		if resp.Header.Get("Sec-WebSocket-Extensions") != "permessage-deflate" {
-			t.Errorf("unexpected Sec-WebSocket-Extensions header: got %q, want %q", resp.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+		if resp.Header.Get("Sec-Websocket-Extensions") != "permessage-deflate" {
+			t.Errorf("unexpected Sec-Websocket-Extensions header: got %q, want %q", resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate")
 		}
 	})
 }
