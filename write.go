@@ -1,9 +1,12 @@
 package websocket
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -31,7 +34,7 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, io.ErrClosedPipe
 	}
-	err := w.conn.writeFrame(w.ctx, false, w.opCode, p)
+	err := w.conn.writeFrame(w.ctx, false, false, w.opCode, p)
 	if err != nil {
 		return 0, err
 	}
@@ -44,7 +47,7 @@ func (w *messageWriter) Close() error {
 		return io.ErrClosedPipe
 	}
 	w.closed = true
-	err := w.conn.writeFrame(w.ctx, true, w.opCode, nil)
+	err := w.conn.writeFrame(w.ctx, true, false, w.opCode, nil)
 	w.conn.writerMu.unlock()
 	if err != nil {
 		return err
@@ -95,13 +98,34 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 	}
 	defer c.writerMu.unlock()
 
-	if err := c.writeFrame(ctx, true, opCode, data); err != nil {
-		return err
+	if c.flate() && len(data) >= c.flateThreshold {
+		return c.writeCompressedFrame(ctx, opCode, data)
 	}
-	return nil
+
+	return c.writeFrame(ctx, true, false, opCode, data)
 }
 
-func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []byte) error {
+// writeCompressedFrame writes a compressed frame to the connection.
+func (c *Conn) writeCompressedFrame(ctx context.Context, opCode opCode, data []byte) error {
+	buf := new(bytes.Buffer)
+	flateWriter, err := flate.NewWriter(buf, flate.DefaultCompression)
+	if err != nil {
+		return err
+	}
+	if _, err := flateWriter.Write(data); err != nil {
+		return err
+	}
+	if err := flateWriter.Flush(); err != nil {
+		return err
+	}
+
+	compressed := buf.Bytes()
+	compressed = bytes.TrimSuffix(compressed, deflateMessageTailBytes)
+	return c.writeFrame(ctx, true, true, opCode, compressed)
+}
+
+// writeFrame writes a frame to the connection.
+func (c *Conn) writeFrame(ctx context.Context, fin, flate bool, opCode opCode, data []byte) error {
 	if err := c.writeFrameMu.lock(ctx); err != nil {
 		return err
 	}
@@ -113,8 +137,13 @@ func (c *Conn) writeFrame(ctx context.Context, fin bool, opCode opCode, data []b
 	}
 	defer c.finishWrite()
 
+	if flate && (opCode != opText && opCode != opBinary) {
+		return errors.New("websocket: cannot compress non-text/binary frame")
+	}
+
 	h := frameHeader{
 		fin:        fin,
+		rsv1:       flate,
 		opCode:     opCode,
 		mask:       c.client,
 		payloadLen: int64(len(data)),

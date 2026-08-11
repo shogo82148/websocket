@@ -192,7 +192,7 @@ func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) e
 		}
 	}
 
-	err = c.writeFrame(ctx, true, opClose, p)
+	err = c.writeFrame(ctx, true, false, opClose, p)
 	// If the connection closed as we're writing we ignore the error as we might
 	// have written the close frame, the peer responded and then someone else read it
 	// and closed the connection.

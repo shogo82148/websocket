@@ -102,6 +102,7 @@ func (copts *compressionOptions) String() string {
 // trying to read more bytes.
 const deflateMessageTail = "\x00\x00\xff\xff" + // WebSocket Synchronized Padding
 	"\x03\x00" // End-of-stream marker (BFINAL=1)
+var deflateMessageTailBytes = []byte{0x00, 0x00, 0xff, 0xff}
 
 var flateReaderPool sync.Pool
 

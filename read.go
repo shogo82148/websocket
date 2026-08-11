@@ -227,7 +227,7 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 		}
 		return ce
 	case opPing:
-		return c.writeFrame(ctx, true, opPong, buf)
+		return c.writeFrame(ctx, true, false, opPong, buf)
 	case opPong:
 	default:
 		c.writeClose(ctx, StatusProtocolError, "received unknown opcode")

@@ -252,4 +252,51 @@ func TestConnWrite(t *testing.T) {
 			t.Fatalf("Write error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+
+	t.Run("writes a compressed text frame when compression is enabled", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 1,
+		})
+
+		if err := conn.Write(ctx, MessageText, []byte("Hello")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		rwc2 := new(testReadWriteCloser)
+		if _, err := rwc2.r.Write(rwc.w.Bytes()); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+		conn2 := newConn(connConfig{
+			rwc:    rwc2,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc2),
+			bw: bufio.NewWriter(rwc2),
+		})
+
+		typ, got, err := conn2.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("Read returned message type = %v; want %v", typ, MessageText)
+		}
+		if string(got) != "Hello" {
+			t.Fatalf("Read returned message = %q; want %q", string(got), "Hello")
+		}
+	})
 }
