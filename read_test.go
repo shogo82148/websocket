@@ -229,6 +229,31 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Reader error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+}
+
+func TestConnRead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reads text message", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
+		conn := newTestConnWithInput(t, frame)
+
+		typ, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Reader failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+
+		want := []byte("hello")
+		if !bytes.Equal(data, want) {
+			t.Fatalf("payload = %q; want %q", data, want)
+		}
+	})
 
 	// RFC 7692 Section 7.2.3.1 A Message Compressed Using One Compressed DEFLATE Block
 	t.Run("a message compressed using one compressed DEFLATE block", func(t *testing.T) {
