@@ -196,6 +196,9 @@ func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) e
 			return err
 		}
 	}
+	if !c.closeSent.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	err = c.writeFrame(ctx, true, false, opClose, p)
 	// If the connection closed as we're writing we ignore the error as we might

@@ -78,9 +78,10 @@ type conn struct {
 	writeCanceledErr error
 
 	// closing TCP connection state
-	closing atomic.Bool
-	closeMu sync.Mutex
-	closed  chan struct{}
+	closing   atomic.Bool
+	closeSent atomic.Bool
+	closeMu   sync.Mutex
+	closed    chan struct{}
 }
 
 type connConfig struct {
