@@ -329,6 +329,58 @@ func TestConnRead(t *testing.T) {
 		}
 	})
 
+	// RFC 7692 Section 7.2.3.2. Sharing LZ77 Sliding Window
+	t.Run("sharing LZ77 sliding window", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, // first frame
+			0xc1, 0x05, 0xf2, 0x00, 0x11, 0x00, 0x00, // second frame
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: false,
+				serverNoContextTakeover: false,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		// validate first frame
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+
+		// validate second frame
+		typ, payload, err = conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want = []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
+
 	// RFC 7692 Section 7.2.3.3. Using a DEFLATE Block with No Compression
 	t.Run("a DEFLATE block with no compression", func(t *testing.T) {
 		t.Parallel()
