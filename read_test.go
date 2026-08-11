@@ -327,6 +327,154 @@ func TestConnRead(t *testing.T) {
 			t.Fatalf("payload = %q; want %q", payload, want)
 		}
 	})
+
+	// RFC 7692 Section 7.2.3.3. Using a DEFLATE Block with No Compression
+	t.Run("a DEFLATE block with no compression", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0xc1, 0x0b, 0x00, 0x05, 0x00, 0xfa, 0xff, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00,
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
+
+	// RFC 7692 Section 7.2.3.4. Using a DEFLATE Block with "BFINAL" Set to 1
+	t.Run("DEFLATE blocks with BFINAL set to 1.", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0xc1, 0x08, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x00,
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
+
+	// RFC 7692 Section 7.2.3.5. Two DEFLATE Blocks in One Message
+	t.Run("Two DEFLATE blocks in one message", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0xc1, 0x0d, 0xf2, 0x48, 0x05, 0x00, 0x00, 0x00, 0xff, 0xff, 0xca, 0xc9, 0xc9, 0x07, 0x00,
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
+
+	// RFC 7692 Section 7.2.3.6. Generating an Empty Fragment
+	t.Run("an Empty Fragment", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0xc1, 0x01, 0x00,
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte{}
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
 }
 
 func TestLimitReader(t *testing.T) {
