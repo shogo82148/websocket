@@ -265,6 +265,31 @@ func TestConnWrite(t *testing.T) {
 		}
 	})
 
+	t.Run("writes masked frames when client is true", func(t *testing.T) {
+		t.Parallel()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true, // client connections must mask frames
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+
+		if err := conn.Write(t.Context(), MessageText, []byte("hello")); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		got := rwc.w.Bytes()
+		if got[1]&0x80 == 0 {
+			t.Fatal("frame is not masked")
+		}
+		maskKey := got[2:6]
+		payload := got[2+4:] // skip header and mask key
+		if maskKey[0]^payload[0] != 'h' || maskKey[1]^payload[1] != 'e' || maskKey[2]^payload[2] != 'l' || maskKey[3]^payload[3] != 'l' || maskKey[0]^payload[4] != 'o' {
+			t.Fatalf("payload is not masked correctly: got %v, mask key %v", payload, maskKey)
+		}
+	})
+
 	t.Run("rejects invalid message type", func(t *testing.T) {
 		t.Parallel()
 		rwc := new(testReadWriteCloser)
