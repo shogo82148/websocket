@@ -45,6 +45,7 @@ type Conn struct {
 	// for synchronizing reads
 	readerMu    *mutex
 	msgReader   *messageReader
+	flateReader *flateReader
 	limitReader *limitReader
 
 	// for synchronizing writes
@@ -110,6 +111,9 @@ func newConn(cfg connConfig) *Conn {
 	c.msgReader = newMessageReader(c)
 	c.limitReader = newLimitReader(c, 32*1024) // default read limit is 32KiB
 	c.msgWriter = newMessageWriter(c)
+	if c.flate() {
+		c.flateReader = new(flateReader)
+	}
 
 	if c.flate() && c.flateThreshold == 0 {
 		var flateContextTakeover bool

@@ -95,6 +95,14 @@ func (copts *compressionOptions) String() string {
 	return b.String()
 }
 
+// These bytes are required to get flate.Reader to return.
+// They are removed when sending to avoid the overhead as
+// WebSocket framing tells when the message has ended but then
+// we need to add them back otherwise flate.Reader keeps
+// trying to read more bytes.
+const deflateMessageTail = "\x00\x00\xff\xff" + // WebSocket Synchronized Padding
+	"\x03\x00" // End-of-stream marker (BFINAL=1)
+
 var flateReaderPool sync.Pool
 
 func getFlateReader(r io.Reader, dict []byte) io.Reader {

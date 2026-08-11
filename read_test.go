@@ -229,6 +229,79 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Reader error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+
+	// RFC 7692 Section 7.2.3.1 A Message Compressed Using One Compressed DEFLATE Block
+	t.Run("a message compressed using one compressed DEFLATE block", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
+
+	// RFC 7692 Section 7.2.3.1 A Message Compressed Using One Compressed DEFLATE Block
+	t.Run("the compressed message with fragmentation", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{
+			0x41, 0x03, 0xf2, 0x48, 0xcd, // first frame
+			0x80, 0x04, 0xc9, 0xc9, 0x07, 0x00, // second frame
+		}
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText {
+			t.Fatalf("message type = %v; want %v", typ, MessageText)
+		}
+		want := []byte("Hello")
+		if !bytes.Equal(payload, want) {
+			t.Fatalf("payload = %q; want %q", payload, want)
+		}
+	})
 }
 
 func TestLimitReader(t *testing.T) {

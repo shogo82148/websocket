@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,13 +11,8 @@ import (
 )
 
 type messageReader struct {
-	ctx         context.Context
-	conn        *Conn
-	flate       bool
-	flateReader io.Reader
-	flateBufio  *bufio.Reader
-	flateTail   strings.Reader
-	dict        *slidingWindow
+	ctx  context.Context
+	conn *Conn
 
 	fin        bool
 	mask       bool
@@ -35,7 +29,6 @@ func newMessageReader(conn *Conn) *messageReader {
 
 func (r *messageReader) reset(ctx context.Context, h frameHeader) {
 	r.ctx = ctx
-	r.flate = h.rsv1
 	r.closed = false
 	r.setHeader(h)
 }
@@ -125,8 +118,12 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		return 0, nil, err
 	}
 
-	r := c.msgReader
-	r.reset(ctx, h)
+	c.msgReader.reset(ctx, h)
+	r := io.Reader(c.msgReader)
+	if flate := h.rsv1; flate {
+		c.flateReader.reset(r)
+		r = c.flateReader
+	}
 	lr := c.limitReader
 	lr.reset(ctx, r)
 	return MessageType(h.opCode), lr, nil
@@ -285,4 +282,19 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 		return 0, ErrMessageTooBig
 	}
 	return n, err
+}
+
+type flateReader struct {
+	flateReader io.Reader
+	flateTail   strings.Reader
+}
+
+func (fr *flateReader) reset(r io.Reader) {
+	fr.flateTail.Reset(deflateMessageTail)
+	r = io.MultiReader(r, &fr.flateTail)
+	fr.flateReader = getFlateReader(r, nil)
+}
+
+func (fr *flateReader) Read(p []byte) (int, error) {
+	return fr.flateReader.Read(p)
 }
