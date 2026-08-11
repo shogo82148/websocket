@@ -46,10 +46,12 @@ type Conn struct {
 	flateThreshold int
 
 	// for synchronizing reads
-	readerMu    *mutex
-	msgReader   *messageReader
-	flateReader *flateReader
-	limitReader *limitReader
+	readerMu      *mutex
+	msgReader     *messageReader
+	flateReader   *flateReader
+	limitReader   *limitReader
+	closeReadOnce sync.Once
+	closeReadCtx  context.Context
 
 	// for synchronizing writes
 	writerMu     *mutex

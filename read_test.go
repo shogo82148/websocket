@@ -592,6 +592,43 @@ func TestConnRead(t *testing.T) {
 	}
 }
 
+func TestConnCloseRead(t *testing.T) {
+	t.Run("returns a context canceled when reading stops", func(t *testing.T) {
+		conn := newTestConnWithInput(t, nil)
+		ctx := conn.CloseRead(t.Context())
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("CloseRead context was not canceled")
+		}
+	})
+
+	t.Run("is idempotent", func(t *testing.T) {
+		rwc := &blockedReadWriteCloser{closed: make(chan struct{})}
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		ctx1 := conn.CloseRead(t.Context())
+		ctx2 := conn.CloseRead(context.Background())
+		if ctx1 != ctx2 {
+			t.Fatal("CloseRead returned a different context on the second call")
+		}
+
+		if err := conn.CloseNow(); err != nil {
+			t.Fatalf("CloseNow failed: %v", err)
+		}
+		select {
+		case <-ctx1.Done():
+		case <-time.After(time.Second):
+			t.Fatal("CloseRead context was not canceled after closing the connection")
+		}
+	})
+}
+
 func TestLimitReader(t *testing.T) {
 	t.Parallel()
 

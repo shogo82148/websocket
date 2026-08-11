@@ -176,8 +176,21 @@ func (c *Conn) SetReadLimit(limit int64) {
 //
 // This function is idempotent.
 func (c *Conn) CloseRead(ctx context.Context) context.Context {
-	// TODO: implement CloseRead
-	return ctx
+	c.closeReadOnce.Do(func() {
+		var cancel context.CancelFunc
+		c.closeReadCtx, cancel = context.WithCancel(ctx)
+
+		go func() {
+			defer cancel()
+			defer c.close()
+
+			_, _, err := c.Reader(c.closeReadCtx)
+			if err == nil {
+				_ = c.Close(StatusPolicyViolation, "unexpected data message")
+			}
+		}()
+	})
+	return c.closeReadCtx
 }
 
 func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
