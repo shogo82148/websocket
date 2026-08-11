@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"testing"
 	"time"
 )
@@ -475,6 +476,68 @@ func TestConnRead(t *testing.T) {
 			t.Fatalf("payload = %q; want %q", payload, want)
 		}
 	})
+
+	for _, senderClient := range []bool{true, false} {
+		name := "server messages"
+		if senderClient {
+			name = "client messages"
+		}
+		t.Run("context takeover for "+name, func(t *testing.T) {
+			ctx := t.Context()
+			copts := new(compressionOptions)
+			senderRWC := new(testReadWriteCloser)
+			sender := newConn(connConfig{
+				rwc:            senderRWC,
+				client:         senderClient,
+				copts:          copts,
+				flateThreshold: 1,
+				br:             bufio.NewReader(senderRWC),
+				bw:             bufio.NewWriter(senderRWC),
+			})
+
+			first := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog;"), 128)
+			second := slices.Clone(first)
+			second[len(second)-1] = '!'
+			for _, message := range [][]byte{first, second} {
+				w, err := sender.Writer(ctx, MessageBinary)
+				if err != nil {
+					t.Fatalf("Writer failed: %v", err)
+				}
+				if _, err := w.Write(message); err != nil {
+					t.Fatalf("Write failed: %v", err)
+				}
+				if err := w.Close(); err != nil {
+					t.Fatalf("Close failed: %v", err)
+				}
+			}
+
+			receiverRWC := new(testReadWriteCloser)
+			if _, err := receiverRWC.r.Write(senderRWC.w.Bytes()); err != nil {
+				t.Fatalf("failed to prepare test input: %v", err)
+			}
+			receiver := newConn(connConfig{
+				rwc:    receiverRWC,
+				client: !senderClient,
+				copts:  copts,
+				br:     bufio.NewReader(receiverRWC),
+				bw:     bufio.NewWriter(receiverRWC),
+			})
+			receiver.SetReadLimit(-1)
+
+			for i, want := range [][]byte{first, second} {
+				typ, got, err := receiver.Read(ctx)
+				if err != nil {
+					t.Fatalf("Read message %d failed: %v", i+1, err)
+				}
+				if typ != MessageBinary {
+					t.Fatalf("message %d type = %v; want %v", i+1, typ, MessageBinary)
+				}
+				if !bytes.Equal(got, want) {
+					t.Fatalf("message %d payload does not match", i+1)
+				}
+			}
+		})
+	}
 }
 
 func TestLimitReader(t *testing.T) {

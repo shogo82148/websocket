@@ -121,12 +121,19 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	c.msgReader.reset(ctx, h)
 	r := io.Reader(c.msgReader)
 	if flate := h.rsv1; flate {
-		c.flateReader.reset(r)
+		c.flateReader.reset(r, c.flateReadContextTakeover())
 		r = c.flateReader
 	}
 	lr := c.limitReader
 	lr.reset(ctx, r)
 	return MessageType(h.opCode), lr, nil
+}
+
+func (c *Conn) flateReadContextTakeover() bool {
+	if c.client {
+		return !c.copts.serverNoContextTakeover
+	}
+	return !c.copts.clientNoContextTakeover
 }
 
 // Read reads a single WebSocket message from the connection.
@@ -287,11 +294,19 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 type flateReader struct {
 	flateReader io.Reader
 	flateTail   strings.Reader
+	dict        slidingWindow
+	takeover    bool
 }
 
-func (fr *flateReader) reset(r io.Reader) {
+func (fr *flateReader) reset(r io.Reader, takeover bool) {
 	fr.flateTail.Reset(deflateMessageTail)
 	r = io.MultiReader(r, &fr.flateTail)
+	fr.takeover = takeover
+	if takeover {
+		fr.dict.init(32 * 1024)
+		fr.flateReader = getFlateReader(r, fr.dict.buf)
+		return
+	}
 	fr.flateReader = getFlateReader(r, nil)
 }
 
@@ -300,6 +315,9 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 		return 0, net.ErrClosed
 	}
 	n, err := fr.flateReader.Read(p)
+	if fr.takeover {
+		fr.dict.write(p[:n])
+	}
 	if errors.Is(err, io.EOF) {
 		fr.close()
 	}
