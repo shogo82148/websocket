@@ -251,8 +251,15 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 		}
 		return ce
 	case opPing:
+		if c.onPingReceived != nil && !c.onPingReceived(ctx, buf) {
+			return nil
+		}
 		return c.writeFrame(ctx, true, false, opPong, buf)
 	case opPong:
+		if c.onPongReceived != nil {
+			c.onPongReceived(ctx, buf)
+		}
+		c.handlePong(buf)
 	default:
 		c.abnormalClosure(ctx, StatusProtocolError, "received unknown opcode")
 		return fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
