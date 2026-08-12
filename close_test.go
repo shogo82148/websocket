@@ -7,44 +7,9 @@ import (
 	"errors"
 	"io"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 )
-
-type closeTrackingRWC struct {
-	r, w       bytes.Buffer
-	closeCount atomic.Int32
-}
-
-func (rw *closeTrackingRWC) Read(p []byte) (int, error) {
-	return rw.r.Read(p)
-}
-
-func (rw *closeTrackingRWC) Write(p []byte) (int, error) {
-	return rw.w.Write(p)
-}
-
-func (rw *closeTrackingRWC) Close() error {
-	rw.closeCount.Add(1)
-	return nil
-}
-
-func newCloseTestConn(t *testing.T, input []byte) (*Conn, *closeTrackingRWC) {
-	t.Helper()
-
-	rwc := new(closeTrackingRWC)
-	if _, err := rwc.r.Write(input); err != nil {
-		t.Fatalf("failed to prepare test input: %v", err)
-	}
-	c := newConn(connConfig{
-		rwc:    rwc,
-		client: true,
-		br:     bufio.NewReader(rwc),
-		bw:     bufio.NewWriter(rwc),
-	})
-	return c, rwc
-}
 
 func TestCloseError(t *testing.T) {
 	t.Parallel()
@@ -169,7 +134,7 @@ func TestParseClosePayload(t *testing.T) {
 func TestConnWaitCloseHandshake(t *testing.T) {
 	t.Run("accepts a close frame", func(t *testing.T) {
 		ctx := t.Context()
-		conn, _ := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
+		conn, _ := newTestConnWithInput(t, []byte{0x88, 0x02, 0x03, 0xe8})
 
 		err := conn.waitCloseHandshake(ctx)
 		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusNormalClosure {
@@ -184,7 +149,7 @@ func TestConnWaitCloseHandshake(t *testing.T) {
 			0x82, 0x03, 0x01, 0x02, 0x03,
 			0x88, 0x02, 0x03, 0xe8,
 		}
-		conn, _ := newCloseTestConn(t, input)
+		conn, _ := newTestConnWithInput(t, input)
 
 		err := conn.waitCloseHandshake(ctx)
 		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusNormalClosure {
@@ -194,7 +159,7 @@ func TestConnWaitCloseHandshake(t *testing.T) {
 
 	t.Run("returns an error when the transport closes before a close frame", func(t *testing.T) {
 		ctx := t.Context()
-		conn, _ := newCloseTestConn(t, nil)
+		conn, _ := newTestConnWithInput(t, nil)
 
 		err := conn.waitCloseHandshake(ctx)
 		if !errors.Is(err, io.EOF) {
@@ -223,7 +188,7 @@ func TestConnWaitCloseHandshake(t *testing.T) {
 func TestConnCloseHandshake(t *testing.T) {
 	t.Run("returns an error when the peer responds with a different status", func(t *testing.T) {
 		ctx := t.Context()
-		conn, _ := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe9})
+		conn, _ := newTestConnWithInput(t, []byte{0x88, 0x02, 0x03, 0xe9})
 
 		err := conn.closeHandshake(ctx, StatusNormalClosure, "")
 		ce, ok := errors.AsType[CloseError](err)
@@ -236,7 +201,7 @@ func TestConnCloseHandshake(t *testing.T) {
 	})
 
 	t.Run("sends close, receives close, and closes the transport", func(t *testing.T) {
-		conn, rwc := newCloseTestConn(t, []byte{0x88, 0x02, 0x03, 0xe8})
+		conn, rwc := newTestConnWithInput(t, []byte{0x88, 0x02, 0x03, 0xe8})
 
 		if err := conn.Close(StatusNormalClosure, ""); err != nil {
 			t.Fatalf("Close failed: %v", err)
@@ -268,7 +233,7 @@ func TestConnCloseHandshake(t *testing.T) {
 	})
 
 	t.Run("responds when the peer initiates the handshake", func(t *testing.T) {
-		conn, rwc := newCloseTestConn(t, []byte{0x88, 0x05, 0x03, 0xe9, 'b', 'y', 'e'})
+		conn, rwc := newTestConnWithInput(t, []byte{0x88, 0x05, 0x03, 0xe9, 'b', 'y', 'e'})
 
 		_, _, err := conn.Reader(t.Context())
 		var ce CloseError
