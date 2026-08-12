@@ -153,10 +153,15 @@ func (c *Conn) Close(code StatusCode, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := c.closeHandshake(ctx, code, reason); err != nil {
-		return err
+	handshakeErr := c.closeHandshake(ctx, code, reason)
+	closeErr := c.close()
+	if handshakeErr != nil {
+		return handshakeErr
 	}
-	return nil
+	if errors.Is(closeErr, net.ErrClosed) {
+		return nil
+	}
+	return closeErr
 }
 
 // CloseNow closes the WebSocket connection without attempting a close handshake.
@@ -174,6 +179,12 @@ func (c *Conn) closeHandshake(ctx context.Context, code StatusCode, reason strin
 		return err
 	}
 	if err := c.waitCloseHandshake(ctx); err != nil {
+		if ce, ok := errors.AsType[CloseError](err); ok && ce.Code == code {
+			return nil
+		}
+		if ce := c.closeReceived.Load(); ce != nil && ce.Code == code {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -191,6 +202,9 @@ func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) e
 			return err
 		}
 	}
+	if !c.closeSent.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	err = c.writeFrame(ctx, true, false, opClose, p)
 	// If the connection closed as we're writing we ignore the error as we might
@@ -198,6 +212,16 @@ func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) e
 	// and closed the connection.
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
+	}
+	return err
+}
+
+// abnormalClosure sends a close frame with the given code and reason and then closes the connection.
+// It is used when the close handshake cannot be continued due to the nature of the error that occurred.
+func (c *Conn) abnormalClosure(ctx context.Context, code StatusCode, reason string) error {
+	err := c.writeClose(ctx, code, reason)
+	if err0 := c.close(); err == nil {
+		err = err0
 	}
 	return err
 }

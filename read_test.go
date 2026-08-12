@@ -31,7 +31,7 @@ func (r *blockedReadWriteCloser) Close() error {
 	return nil
 }
 
-func newTestConnWithInput(t *testing.T, input []byte) *Conn {
+func newTestConnWithInput(t *testing.T, input []byte) (*Conn, *testReadWriteCloser) {
 	t.Helper()
 
 	rwc := new(testReadWriteCloser)
@@ -44,7 +44,7 @@ func newTestConnWithInput(t *testing.T, input []byte) *Conn {
 		client: true,
 		br:     bufio.NewReader(rwc),
 		bw:     bufio.NewWriter(rwc),
-	})
+	}), rwc
 }
 
 func TestConnReader(t *testing.T) {
@@ -55,7 +55,7 @@ func TestConnReader(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(ctx)
 		if err != nil {
@@ -79,7 +79,7 @@ func TestConnReader(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(ctx)
 		if err != nil {
@@ -102,7 +102,7 @@ func TestConnReader(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
 
-		conn := newTestConnWithInput(t, nil)
+		conn, _ := newTestConnWithInput(t, nil)
 
 		_, _, err := conn.Reader(ctx)
 		if !errors.Is(err, io.EOF) {
@@ -115,7 +115,7 @@ func TestConnReader(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 
 		_, r, err := conn.Reader(ctx)
 		if err != nil {
@@ -153,7 +153,7 @@ func TestConnReader(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x81, 0x00}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 
 		typ, r, err := conn.Reader(ctx)
 		if err != nil {
@@ -178,7 +178,7 @@ func TestConnReader(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 		conn.client = false // disable masking for outgoing frames
 		_, r, err := conn.Reader(ctx)
 		if err != nil {
@@ -240,7 +240,7 @@ func TestConnRead(t *testing.T) {
 		ctx := t.Context()
 
 		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
-		conn := newTestConnWithInput(t, frame)
+		conn, _ := newTestConnWithInput(t, frame)
 
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
@@ -594,7 +594,7 @@ func TestConnRead(t *testing.T) {
 
 func TestConnCloseRead(t *testing.T) {
 	t.Run("returns a context canceled when reading stops", func(t *testing.T) {
-		conn := newTestConnWithInput(t, nil)
+		conn, _ := newTestConnWithInput(t, nil)
 		ctx := conn.CloseRead(t.Context())
 
 		select {

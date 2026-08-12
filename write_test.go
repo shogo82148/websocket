@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type testReadWriteCloser struct {
-	r, w bytes.Buffer
+	r, w       bytes.Buffer
+	closeCount atomic.Int32
 }
 
 func (rw *testReadWriteCloser) Read(p []byte) (int, error) {
@@ -22,6 +24,7 @@ func (rw *testReadWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (rw *testReadWriteCloser) Close() error {
+	rw.closeCount.Add(1)
 	return nil
 }
 
