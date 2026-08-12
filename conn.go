@@ -3,7 +3,7 @@ package websocket
 import (
 	"bufio"
 	"context"
-	"errors"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
@@ -57,6 +57,12 @@ type Conn struct {
 	writerMu     *mutex
 	writeFrameMu *mutex
 	msgWriter    *messageWriter
+
+	// for handling ping and pong control frames
+	onPingReceived func(context.Context, []byte) bool
+	onPongReceived func(context.Context, []byte)
+	pingMu         sync.Mutex
+	pings          map[string]chan struct{}
 }
 
 type conn struct {
@@ -91,6 +97,8 @@ type connConfig struct {
 	subprotocol    string
 	copts          *compressionOptions
 	flateThreshold int
+	onPingReceived func(context.Context, []byte) bool
+	onPongReceived func(context.Context, []byte)
 
 	br *bufio.Reader
 	bw *bufio.Writer
@@ -111,6 +119,9 @@ func newConn(cfg connConfig) *Conn {
 		subprotocol:    cfg.subprotocol,
 		copts:          cfg.copts,
 		flateThreshold: cfg.flateThreshold,
+		onPingReceived: cfg.onPingReceived,
+		onPongReceived: cfg.onPongReceived,
+		pings:          make(map[string]chan struct{}),
 
 		readerMu:     newMutex(closed),
 		writerMu:     newMutex(closed),
@@ -154,7 +165,53 @@ func (c *Conn) flate() bool {
 
 // Ping sends a ping to the peer and waits for a pong.
 func (c *Conn) Ping(ctx context.Context) error {
-	return errors.New("not implemented")
+	var payload [8]byte
+	var pong chan struct{}
+	var key string
+
+	c.pingMu.Lock()
+	for {
+		if _, err := rand.Read(payload[:]); err != nil {
+			c.pingMu.Unlock()
+			return fmt.Errorf("websocket: failed to generate ping payload: %w", err)
+		}
+		key = string(payload[:])
+		if _, exists := c.pings[key]; !exists {
+			pong = make(chan struct{})
+			c.pings[key] = pong
+			break
+		}
+	}
+	c.pingMu.Unlock()
+
+	defer func() {
+		c.pingMu.Lock()
+		delete(c.pings, key)
+		c.pingMu.Unlock()
+	}()
+
+	if err := c.writeFrame(ctx, true, false, opPing, payload[:]); err != nil {
+		return err
+	}
+
+	select {
+	case <-pong:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.closed:
+		return net.ErrClosed
+	}
+}
+
+func (c *Conn) handlePong(payload []byte) {
+	c.pingMu.Lock()
+	pong := c.pings[string(payload)]
+	if pong != nil {
+		delete(c.pings, string(payload))
+		close(pong)
+	}
+	c.pingMu.Unlock()
 }
 
 // Subprotocol returns the negotiated subprotocol.

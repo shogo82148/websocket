@@ -156,6 +156,8 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		subprotocol:    subprotocol,
 		copts:          copts,
 		flateThreshold: opts.CompressionThreshold,
+		onPingReceived: opts.OnPingReceived,
+		onPongReceived: opts.OnPongReceived,
 
 		br: brw.Reader,
 		bw: brw.Writer,
