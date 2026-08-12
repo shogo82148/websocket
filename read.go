@@ -213,7 +213,7 @@ func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 		case opContinuation, opText, opBinary:
 			return h, nil
 		default:
-			c.writeClose(ctx, StatusProtocolError, "received unknown opcode")
+			c.abnormalClosure(ctx, StatusProtocolError, "received unknown opcode")
 			return frameHeader{}, fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
 		}
 	}
@@ -222,11 +222,11 @@ func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 	// validate control frame
 	if h.payloadLen < 0 || h.payloadLen > maxControlPayload {
-		c.writeClose(ctx, StatusProtocolError, "control frame payload length is invalid")
+		c.abnormalClosure(ctx, StatusProtocolError, "control frame payload length is invalid")
 		return fmt.Errorf("websocket: control frame payload length is invalid: %d", h.payloadLen)
 	}
 	if !h.fin {
-		c.writeClose(ctx, StatusProtocolError, "control frame is fragmented")
+		c.abnormalClosure(ctx, StatusProtocolError, "control frame is fragmented")
 		return errors.New("websocket: control frame is fragmented")
 	}
 
@@ -242,7 +242,7 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 	case opClose:
 		ce, err := parseClosePayload(buf)
 		if err != nil {
-			c.writeClose(ctx, StatusProtocolError, "received invalid close payload")
+			c.abnormalClosure(ctx, StatusProtocolError, "received invalid close payload")
 			return err
 		}
 		c.closeReceived.Store(&ce)
@@ -254,7 +254,7 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 		return c.writeFrame(ctx, true, false, opPong, buf)
 	case opPong:
 	default:
-		c.writeClose(ctx, StatusProtocolError, "received unknown opcode")
+		c.abnormalClosure(ctx, StatusProtocolError, "received unknown opcode")
 		return fmt.Errorf("websocket: received unknown opcode: %d", h.opCode)
 	}
 	return nil
@@ -302,7 +302,7 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 		lr.n = 0
 	}
 	if lr.n == 0 {
-		lr.c.writeClose(lr.ctx, StatusMessageTooBig, "read limit")
+		lr.c.abnormalClosure(lr.ctx, StatusMessageTooBig, "read limit")
 		return 0, ErrMessageTooBig
 	}
 	return n, err

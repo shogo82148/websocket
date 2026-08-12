@@ -216,6 +216,16 @@ func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) e
 	return err
 }
 
+// abnormalClosure sends a close frame with the given code and reason and then closes the connection.
+// It is used when the close handshake cannot be continued due to the nature of the error that occurred.
+func (c *Conn) abnormalClosure(ctx context.Context, code StatusCode, reason string) error {
+	err := c.writeClose(ctx, code, reason)
+	if err0 := c.close(); err == nil {
+		err = err0
+	}
+	return err
+}
+
 // waitCloseHandshake waits for a close frame from the peer and returns the status code and reason.
 func (c *Conn) waitCloseHandshake(ctx context.Context) error {
 	for {
