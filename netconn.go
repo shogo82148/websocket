@@ -123,6 +123,7 @@ func (nc *netConn) read(p []byte) (int, error) {
 			return 0, err
 		}
 		if typ != nc.msgType {
+			nc.c.Close(StatusUnsupportedData, "unsupported message type")
 			return 0, errors.New("unsupported message type")
 		}
 		nc.reader = r
