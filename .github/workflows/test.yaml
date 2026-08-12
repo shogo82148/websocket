@@ -39,3 +39,4 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: shogo82148/websocket
+          files: profile.cov
