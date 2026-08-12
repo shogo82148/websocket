@@ -209,3 +209,122 @@ func TestNetConnAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestNetConnReadDeadline(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interrupts active read", func(t *testing.T) {
+		nc, _ := newNetConnPair(t, MessageBinary)
+		if err := nc.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+			t.Fatalf("SetReadDeadline failed: %v", err)
+		}
+
+		_, err := nc.Read(make([]byte, 1))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Read error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
+
+	t.Run("past deadline affects future read", func(t *testing.T) {
+		nc, _ := newNetConnPair(t, MessageBinary)
+		if err := nc.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
+			t.Fatalf("SetReadDeadline failed: %v", err)
+		}
+
+		_, err := nc.Read(make([]byte, 1))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Read error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
+
+	t.Run("zero deadline clears expiry", func(t *testing.T) {
+		nc, peer := newNetConnPair(t, MessageBinary)
+		if err := nc.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
+			t.Fatalf("SetReadDeadline failed: %v", err)
+		}
+		if err := nc.SetReadDeadline(time.Time{}); err != nil {
+			t.Fatalf("clearing read deadline failed: %v", err)
+		}
+
+		writeErr := make(chan error, 1)
+		go func() { writeErr <- peer.Write(t.Context(), MessageBinary, []byte("x")) }()
+		buf := make([]byte, 1)
+		if _, err := io.ReadFull(nc, buf); err != nil {
+			t.Fatalf("Read after clearing deadline failed: %v", err)
+		}
+		if string(buf) != "x" {
+			t.Fatalf("read %q; want %q", buf, "x")
+		}
+		if err := <-writeErr; err != nil {
+			t.Fatalf("peer Write failed: %v", err)
+		}
+	})
+}
+
+func TestNetConnWriteDeadline(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interrupts active write", func(t *testing.T) {
+		nc, _ := newNetConnPair(t, MessageBinary)
+		if err := nc.SetWriteDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+			t.Fatalf("SetWriteDeadline failed: %v", err)
+		}
+
+		_, err := nc.Write([]byte("blocked"))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Write error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
+
+	t.Run("past deadline affects future write", func(t *testing.T) {
+		nc, _ := newNetConnPair(t, MessageBinary)
+		if err := nc.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+			t.Fatalf("SetWriteDeadline failed: %v", err)
+		}
+
+		_, err := nc.Write([]byte("x"))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Write error = %v; want wrapping %v", err, context.DeadlineExceeded)
+		}
+	})
+
+	t.Run("zero deadline clears expiry", func(t *testing.T) {
+		nc, peer := newNetConnPair(t, MessageBinary)
+		if err := nc.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+			t.Fatalf("SetWriteDeadline failed: %v", err)
+		}
+		if err := nc.SetWriteDeadline(time.Time{}); err != nil {
+			t.Fatalf("clearing write deadline failed: %v", err)
+		}
+
+		readErr := make(chan error, 1)
+		go func() {
+			_, data, err := peer.Read(t.Context())
+			if err == nil && string(data) != "x" {
+				err = errors.New("peer read unexpected data")
+			}
+			readErr <- err
+		}()
+		if _, err := nc.Write([]byte("x")); err != nil {
+			t.Fatalf("Write after clearing deadline failed: %v", err)
+		}
+		if err := <-readErr; err != nil {
+			t.Fatalf("peer Read failed: %v", err)
+		}
+	})
+}
+
+func TestNetConnSetDeadline(t *testing.T) {
+	t.Parallel()
+
+	nc, _ := newNetConnPair(t, MessageBinary)
+	if err := nc.SetDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("SetDeadline failed: %v", err)
+	}
+	if _, err := nc.Read(make([]byte, 1)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Read error = %v; want wrapping %v", err, context.DeadlineExceeded)
+	}
+	if _, err := nc.Write([]byte("x")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Write error = %v; want wrapping %v", err, context.DeadlineExceeded)
+	}
+}

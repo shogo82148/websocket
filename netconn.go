@@ -3,8 +3,11 @@ package websocket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,35 +47,56 @@ func NetConn(ctx context.Context, c *Conn, msgType MessageType) net.Conn {
 	c.SetReadLimit(-1)
 
 	nc := &netConn{
-		ctx:     ctx,
 		c:       c,
 		msgType: msgType,
 	}
+	nc.readDeadline.init(ctx, &nc.readMu)
+	nc.writeDeadline.init(ctx, &nc.writeMu)
 	return nc
 }
 
 type netConn struct {
-	ctx     context.Context
 	c       *Conn
 	msgType MessageType
 
-	reader io.Reader
+	readMu       sync.Mutex
+	readDeadline netConnDeadline
+	reader       io.Reader
+
+	writeMu       sync.Mutex
+	writeDeadline netConnDeadline
 }
 
 var _ net.Conn = (*netConn)(nil)
 
 func (nc *netConn) Write(p []byte) (int, error) {
-	err := nc.c.Write(nc.ctx, nc.msgType, p)
+	nc.writeMu.Lock()
+	defer nc.writeMu.Unlock()
+
+	if nc.writeDeadline.expired.Load() {
+		return 0, fmt.Errorf("websocket: failed to write: %w", context.DeadlineExceeded)
+	}
+
+	err := nc.c.Write(nc.writeDeadline.ctx, nc.msgType, p)
 	if err != nil {
+		if nc.writeDeadline.expired.Load() {
+			return 0, fmt.Errorf("websocket: failed to write: %w", context.DeadlineExceeded)
+		}
 		return 0, err
 	}
 	return len(p), nil
 }
 
 func (nc *netConn) Read(p []byte) (int, error) {
+	nc.readMu.Lock()
+	defer nc.readMu.Unlock()
+
 	for {
 		n, err := nc.read(p)
 		if err != nil {
+			if nc.readDeadline.expired.Load() {
+				return n, fmt.Errorf("websocket: failed to read: %w", context.DeadlineExceeded)
+			}
 			return n, err
 		}
 		if n <= 0 {
@@ -83,8 +107,12 @@ func (nc *netConn) Read(p []byte) (int, error) {
 }
 
 func (nc *netConn) read(p []byte) (int, error) {
+	if nc.readDeadline.expired.Load() {
+		return 0, fmt.Errorf("websocket: failed to read: %w", context.DeadlineExceeded)
+	}
+
 	if nc.reader == nil {
-		typ, r, err := nc.c.Reader(nc.ctx)
+		typ, r, err := nc.c.Reader(nc.readDeadline.ctx)
 		if err != nil {
 			if ce, ok := errors.AsType[CloseError](err); ok {
 				switch ce.Code {
@@ -108,7 +136,77 @@ func (nc *netConn) read(p []byte) (int, error) {
 }
 
 func (nc *netConn) Close() error {
+	nc.readDeadline.close()
+	nc.writeDeadline.close()
 	return nc.c.Close(StatusNormalClosure, "normal closure")
+}
+
+type netConnDeadline struct {
+	mu       sync.Mutex
+	deadline time.Time
+	timer    *time.Timer
+	opMu     *sync.Mutex
+
+	ctx     context.Context
+	cancel  context.CancelFunc
+	expired atomic.Bool
+}
+
+func (d *netConnDeadline) init(ctx context.Context, opMu *sync.Mutex) {
+	d.opMu = opMu
+	d.ctx, d.cancel = context.WithCancel(ctx)
+	d.timer = time.AfterFunc(time.Hour, d.fire)
+	d.timer.Stop()
+}
+
+func (d *netConnDeadline) fire() {
+	d.mu.Lock()
+	if d.deadline.IsZero() {
+		d.mu.Unlock()
+		return
+	}
+	if until := time.Until(d.deadline); until > 0 {
+		d.timer.Reset(until)
+		d.mu.Unlock()
+		return
+	}
+	d.expired.Store(true)
+	d.mu.Unlock()
+
+	if !d.opMu.TryLock() {
+		// Conn can only interrupt an in-flight operation by closing the
+		// underlying connection through context cancellation.
+		d.cancel()
+		return
+	}
+	d.opMu.Unlock()
+}
+
+func (d *netConnDeadline) set(t time.Time) {
+	d.mu.Lock()
+	d.deadline = t
+	d.expired.Store(false)
+	d.timer.Stop()
+	if t.IsZero() {
+		d.mu.Unlock()
+		return
+	}
+	until := time.Until(t)
+	if until > 0 {
+		d.timer.Reset(until)
+		d.mu.Unlock()
+		return
+	}
+	d.mu.Unlock()
+	d.fire()
+}
+
+func (d *netConnDeadline) close() {
+	d.mu.Lock()
+	d.deadline = time.Time{}
+	d.timer.Stop()
+	d.mu.Unlock()
+	d.cancel()
 }
 
 type websocketAddr struct{}
@@ -142,9 +240,11 @@ func (nc *netConn) SetDeadline(t time.Time) error {
 }
 
 func (nc *netConn) SetReadDeadline(t time.Time) error {
-	return errors.New("TODO: implement me")
+	nc.readDeadline.set(t)
+	return nil
 }
 
 func (nc *netConn) SetWriteDeadline(t time.Time) error {
-	return errors.New("TODO: implement me")
+	nc.writeDeadline.set(t)
+	return nil
 }
