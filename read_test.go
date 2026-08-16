@@ -808,6 +808,54 @@ func BenchmarkConnReader(b *testing.B) {
 			}
 		}
 	})
+
+	b.Run("read a compressed binary frame on the client", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 1,
+		})
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			b.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+		buf := make([]byte, 1024)
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, r, err := conn.Reader(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+			for {
+				_, err := r.Read(buf)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					b.Fatalf("Read failed: %v", err)
+				}
+			}
+		}
+	})
 }
 
 func FuzzConnReader(f *testing.F) {
