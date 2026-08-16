@@ -756,3 +756,28 @@ func BenchmarkConnReader(b *testing.B) {
 		}
 	})
 }
+
+func FuzzConnReader(f *testing.F) {
+	f.Add([]byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}, true, false)
+	f.Add([]byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}, true, false)
+	f.Add([]byte{0x81, 0x00}, true, false)
+	f.Add([]byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}, false, false)
+	f.Add([]byte{0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}, true, true)
+	f.Add([]byte{0x41, 0x03, 0xf2, 0x48, 0xcd, 0x80, 0x04, 0xc9, 0xc9, 0x07, 0x00}, true, true)
+
+	f.Fuzz(func(t *testing.T, frame []byte, client, compressed bool) {
+		conn, _ := newTestConnWithInput(t, frame)
+		conn.client = client
+		if compressed {
+			conn.copts = &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			}
+		}
+		_, r, err := conn.Reader(t.Context())
+		if err != nil {
+			return
+		}
+		io.Copy(io.Discard, r)
+	})
+}
