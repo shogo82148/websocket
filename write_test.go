@@ -343,6 +343,9 @@ func TestConnWrite(t *testing.T) {
 		if err == nil {
 			t.Fatal("Write succeeded for invalid UTF-8 payload")
 		}
+		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusInvalidFramePayloadData {
+			t.Fatalf("Write returned unexpected error: %v; want CloseError with code %d", err, StatusInvalidFramePayloadData)
+		}
 	})
 
 	t.Run("respects writer lock context cancellation", func(t *testing.T) {
