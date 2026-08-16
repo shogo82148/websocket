@@ -211,7 +211,7 @@ func TestConnCloseHandshake(t *testing.T) {
 		}
 
 		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
-		h, err := readFrameHeader(br)
+		h, err := conn.readFrameHeader()
 		if err != nil {
 			t.Fatalf("failed to read sent close frame: %v", err)
 		}
@@ -245,7 +245,7 @@ func TestConnCloseHandshake(t *testing.T) {
 		}
 
 		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
-		h, err := readFrameHeader(br)
+		h, err := conn.readFrameHeader()
 		if err != nil {
 			t.Fatalf("peer-initiated close produced no response frame: %v", err)
 		}
@@ -282,7 +282,7 @@ func TestConnCloseHandshake(t *testing.T) {
 		peerErr := make(chan error, 1)
 		go func() {
 			br := bufio.NewReader(peer)
-			h, err := readFrameHeader(br)
+			h, err := conn.readFrameHeader()
 			if err != nil {
 				peerErr <- err
 				return

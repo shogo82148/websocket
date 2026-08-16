@@ -81,6 +81,7 @@ type conn struct {
 	// for handling context cancellation
 	readWatcher      chan<- context.Context
 	readFinished     chan<- struct{}
+	readBuf          [8]byte
 	readCanceledMu   sync.Mutex
 	readCanceledErr  error
 	writeWatcher     chan<- context.Context

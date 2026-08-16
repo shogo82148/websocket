@@ -241,7 +241,8 @@ func TestReadFrameHeader(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			br := bufio.NewReader(bytes.NewReader(test.input))
-			got, err := readFrameHeader(br)
+			conn := &Conn{conn: &conn{br: br}}
+			got, err := conn.readFrameHeader()
 
 			if test.wantErr != nil {
 				if !errors.Is(err, test.wantErr) {

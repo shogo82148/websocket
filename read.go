@@ -220,7 +220,7 @@ func (c *Conn) validRSVBits(h frameHeader) bool {
 
 func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 	for {
-		h, err := readFrameHeader(c.br)
+		h, err := c.readFrameHeader()
 		if err != nil {
 			return frameHeader{}, err
 		}
