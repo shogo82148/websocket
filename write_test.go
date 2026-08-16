@@ -330,6 +330,24 @@ func TestConnWrite(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects invalid UTF-8 payload", func(t *testing.T) {
+		t.Parallel()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
+		})
+
+		err := conn.Write(t.Context(), MessageText, []byte{0xff, 0xfe, 0xfd})
+		if err == nil {
+			t.Fatal("Write succeeded for invalid UTF-8 payload")
+		}
+		if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusInvalidFramePayloadData {
+			t.Fatalf("Write returned unexpected error: %v; want CloseError with code %d", err, StatusInvalidFramePayloadData)
+		}
+	})
+
 	t.Run("respects writer lock context cancellation", func(t *testing.T) {
 		t.Parallel()
 		rwc := new(testReadWriteCloser)
