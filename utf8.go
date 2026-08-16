@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-type utf8State int
+type utf8State byte
 
 const utf8StateFail utf8State = 8
 

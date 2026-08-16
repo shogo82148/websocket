@@ -20,6 +20,16 @@ var utf8TestCases = []struct {
 	{"\xE3\x81", false},
 }
 
+func TestUTF8States(t *testing.T) {
+	for i, state := range utf8States {
+		for j, b := range state {
+			if int(b) < 0 || int(b) >= len(utf8States) {
+				t.Errorf("invalid state at utf8States[%d][%d]: %d", i, j, b)
+			}
+		}
+	}
+}
+
 func TestUTF8Reader(t *testing.T) {
 	for _, tc := range utf8TestCases {
 		t.Run(fmt.Sprintf("%q", tc.input), func(t *testing.T) {
