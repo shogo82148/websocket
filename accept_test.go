@@ -425,3 +425,107 @@ func BenchmarkAcceptHeader(b *testing.B) {
 		acceptHeader("dGhlIHNhbXBsZSBub25jZQ==")
 	}
 }
+
+func TestValidateOrigin(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		origin   string
+		host     string
+		patterns []string
+		success  bool
+	}{
+		{
+			name:    "none",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "invalid",
+			origin:  "$#)(*)$#@*$(#@*$)#@*%)#(@*%)#(@%#@$#@$#$#@$#@}{}{}",
+			host:    "example.com",
+			success: false,
+		},
+		{
+			name:    "host mismatch",
+			origin:  "http://example.com",
+			host:    "example1.com",
+			success: false,
+		},
+		{
+			name:    "host match",
+			origin:  "http://example.com",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "host is case-insensitive",
+			origin:  "https://examplE.com",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:   "origin patterns",
+			origin: "https://two.examplE.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://*.example.com",
+				"https://bar.com",
+			},
+			success: true,
+		},
+		{
+			name:   "scheme mismatch",
+			origin: "https://two.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"http://*.example.com",
+			},
+			success: false,
+		},
+		{
+			name:   "origin patterns with scheme and port",
+			origin: "https://example.com:8443",
+			host:   "example.com",
+			patterns: []string{
+				"https://example.com:8443",
+			},
+			success: true,
+		},
+		{
+			name:   "default port matches",
+			origin: "https://foo.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://foo.example.com:443",
+			},
+			success: true,
+		},
+		{
+			name:   "wildcard pattern does not match multiple subdomains",
+			origin: "https://bar.foo.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://*.example.com",
+			},
+			success: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := httptest.NewRequest(http.MethodGet, "http://"+tc.host, nil)
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
+
+			err := validateOrigin(r, tc.patterns)
+			if (err == nil) != tc.success {
+				t.Fatalf("validateOrigin() error = %v, want success = %v", err, tc.success)
+			}
+		})
+	}
+}

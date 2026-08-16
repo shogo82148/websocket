@@ -10,7 +10,9 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +24,16 @@ type AcceptOptions struct {
 	InsecureSkipVerify bool
 
 	// OriginPatterns lists the host patterns for authorized origins.
+	// The request host is always authorized.
+	// Use this to enable cross origin WebSockets.
+	//
+	// i.e JavaScript running on https://example.com wants to access a WebSocket server at https://chat.example.com.
+	// In such a case, https://example.com is the origin and https://chat.example.com is the request host.
+	// One would set this field to []string{"https://example.com"} to authorize https://example.com to connect.
+	//
+	// The wildcard pattern (*) matches a single arbitrary subdomain.
+	// For example, https://*.example.com matches https://foo.example.com,
+	// but does not match https://bar.foo.example.com.
 	OriginPatterns []string
 
 	// CompressionMode controls the compression mode.
@@ -112,8 +124,13 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	}
 
 	opts = opts.cloneWithDefaults()
-
-	// TODO: validate origin
+	if !opts.InsecureSkipVerify {
+		err := validateOrigin(r, opts.OriginPatterns)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return nil, err
+		}
+	}
 
 	hijacker, ok := hijacker(w)
 	if !ok {
@@ -265,6 +282,93 @@ func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOp
 		return nil, false
 	}
 	return copts, true
+}
+
+// originType represents the origin of a WebSocket connection.
+type originType struct {
+	scheme string
+	host   string
+	port   int
+}
+
+func parseOrigin(s string) (originType, error) {
+	var origin originType
+	u, err := url.Parse(s)
+	if err != nil {
+		return origin, fmt.Errorf("websocket: failed to parse origin: %w", err)
+	}
+
+	switch {
+	case strings.EqualFold(u.Scheme, "http"):
+		origin.scheme = "http"
+		origin.port = 80 // default port for http
+	case strings.EqualFold(u.Scheme, "https"):
+		origin.scheme = "https"
+		origin.port = 443 // default port for https
+	default:
+		return origin, fmt.Errorf("websocket: unsupported origin scheme: %q", u.Scheme)
+	}
+
+	// host is case-insensitive, so we convert it to lowercase for comparison.
+	origin.host = strings.ToLower(u.Hostname())
+
+	if port := u.Port(); port != "" {
+		p, err := strconv.Atoi(port)
+		if err != nil {
+			return origin, fmt.Errorf("websocket: invalid origin port: %w", err)
+		}
+		origin.port = p
+	}
+
+	return origin, nil
+}
+
+func match(origin, allowed originType) bool {
+	if origin.scheme != allowed.scheme {
+		return false
+	}
+	if origin.port != allowed.port {
+		return false
+	}
+
+	// handle wildcard domain patterns
+	for strings.HasPrefix(allowed.host, "*.") {
+		_, after, ok := strings.Cut(origin.host, ".")
+		if !ok {
+			return false
+		}
+		origin.host = after
+		allowed.host = allowed.host[2:] // remove "*."
+	}
+	return origin.host == allowed.host
+}
+
+func validateOrigin(req *http.Request, allowed []string) error {
+	if origins := req.Header.Values("Origin"); len(origins) == 0 {
+		// The communication is allowed because it is not from a browser.
+		return nil
+	}
+
+	origin := req.Header.Get("Origin")
+	o, err := parseOrigin(origin)
+	if err != nil {
+		return fmt.Errorf("websocket: failed to parse origin: %w", err)
+	}
+
+	if strings.EqualFold(o.host, req.Host) {
+		return nil
+	}
+
+	for _, a := range allowed {
+		parsedAllowed, err := parseOrigin(a)
+		if err != nil {
+			return fmt.Errorf("websocket: failed to parse allowed origin: %w", err)
+		}
+		if match(o, parsedAllowed) {
+			return nil
+		}
+	}
+	return fmt.Errorf("websocket: origin not allowed: %q", origin)
 }
 
 func getWebSocketKey(r *http.Request) (string, error) {
