@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -407,6 +408,194 @@ func TestConnWrite(t *testing.T) {
 		}
 		if string(got) != "Hello" {
 			t.Fatalf("Read returned message = %q; want %q", string(got), "Hello")
+		}
+	})
+}
+
+func BenchmarkConnWriter(b *testing.B) {
+	b.Run("writes a text frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			w, err := conn.Writer(ctx, MessageText)
+			if err != nil {
+				b.Fatalf("Writer failed: %v", err)
+			}
+			if _, err := w.Write(payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				b.Fatalf("Close failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a text frame from the client", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			w, err := conn.Writer(ctx, MessageText)
+			if err != nil {
+				b.Fatalf("Writer failed: %v", err)
+			}
+			if _, err := w.Write(payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				b.Fatalf("Close failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a binary frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			w, err := conn.Writer(ctx, MessageBinary)
+			if err != nil {
+				b.Fatalf("Writer failed: %v", err)
+			}
+			if _, err := w.Write(payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				b.Fatalf("Close failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a compressed binary frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 1,
+			br:             bufio.NewReader(rwc),
+			bw:             bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			w, err := conn.Writer(ctx, MessageBinary)
+			if err != nil {
+				b.Fatalf("Writer failed: %v", err)
+			}
+			if _, err := w.Write(payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				b.Fatalf("Close failed: %v", err)
+			}
+		}
+	})
+}
+
+func BenchmarkConnWrite(b *testing.B) {
+	b.Run("writes a text frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			if err := conn.Write(ctx, MessageText, payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a text frame from the client", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(io.Discard),
+			client: true,
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			if err := conn.Write(ctx, MessageText, payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a binary frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			if err := conn.Write(ctx, MessageBinary, payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("writes a compressed binary frame from the server", func(b *testing.B) {
+		ctx := b.Context()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc: rwc,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 1,
+			br:             bufio.NewReader(rwc),
+			bw:             bufio.NewWriter(io.Discard),
+		})
+		payload := []byte("Hello, 世界🍺")
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			if err := conn.Write(ctx, MessageBinary, payload); err != nil {
+				b.Fatalf("Write failed: %v", err)
+			}
 		}
 	})
 }
