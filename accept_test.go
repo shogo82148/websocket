@@ -32,7 +32,6 @@ func TestAccept(t *testing.T) {
 		h.Set("Connection", "Upgrade")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
 		if err != nil {
@@ -405,7 +404,6 @@ func TestAccept(t *testing.T) {
 		h.Set("Connection", "Upgrade")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Set("Origin", "http://example.com")
 		h.Set("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits")
 
 		resp, err := ts.Client().Do(req)
