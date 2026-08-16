@@ -678,6 +678,7 @@ func BenchmarkConnReader(b *testing.B) {
 		payload := []byte("Hello, 世界🍺")
 		frame := newFrame(ctx, MessageText, payload, connConfig{client: true})
 		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
 		buf := make([]byte, 1024)
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
@@ -732,6 +733,7 @@ func BenchmarkConnReader(b *testing.B) {
 		payload := []byte("Hello, 世界🍺")
 		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true})
 		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
 		buf := make([]byte, 1024)
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
