@@ -163,15 +163,14 @@ func TestWriteFrameHeader(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			buf := new(bytes.Buffer)
-			bw := bufio.NewWriter(buf)
-			err := writeFrameHeader(bw, test.header)
+			conn, rwc := newTestConnWithInput(t, []byte{})
+			err := conn.writeFrameHeader(test.header)
 			if err != nil {
 				t.Fatalf("writeFrameHeader failed: %v", err)
 			}
-			bw.Flush()
-			if !bytes.Equal(buf.Bytes(), test.expected) {
-				t.Errorf("expected %v, got %v", test.expected, buf.Bytes())
+			conn.bw.Flush()
+			if !bytes.Equal(rwc.w.Bytes(), test.expected) {
+				t.Errorf("expected %v, got %v", test.expected, rwc.w.Bytes())
 			}
 		})
 	}

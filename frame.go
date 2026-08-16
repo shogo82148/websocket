@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -299,7 +298,9 @@ func (c *Conn) readFrameHeader() (frameHeader, error) {
 	return h, nil
 }
 
-func writeFrameHeader(bw *bufio.Writer, h frameHeader) error {
+func (c *Conn) writeFrameHeader(h frameHeader) error {
+	bw := c.bw
+
 	// Write the first byte of the frame header.
 	var b byte
 	if h.fin {

@@ -230,7 +230,7 @@ func (c *Conn) writeFrame(ctx context.Context, fin, flate bool, opCode opCode, d
 		maskFramePayload(framePayload, h.maskKey)
 	}
 
-	if err := writeFrameHeader(c.bw, h); err != nil {
+	if err := c.writeFrameHeader(h); err != nil {
 		if cerr := c.canceledWrite(); cerr != nil {
 			return cerr
 		}
