@@ -158,12 +158,6 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 		return fmt.Errorf("websocket: invalid message type: %s", messageType)
 	}
 
-	// Acquire the writer lock to ensure that only one writer is active at a time.
-	if err := c.writerMu.lock(ctx); err != nil {
-		return err
-	}
-	defer c.writerMu.unlock()
-
 	if opCode == opText && !c.skipValidateUTF8 {
 		if !utf8.Valid(data) {
 			c.abnormalClosure(ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
@@ -173,6 +167,12 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 			}
 		}
 	}
+
+	// Acquire the writer lock to ensure that only one writer is active at a time.
+	if err := c.writerMu.lock(ctx); err != nil {
+		return err
+	}
+	defer c.writerMu.unlock()
 
 	if c.flate() && len(data) >= c.flateThreshold {
 		return c.writeCompressedFrame(ctx, opCode, data)
