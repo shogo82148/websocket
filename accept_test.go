@@ -32,7 +32,6 @@ func TestAccept(t *testing.T) {
 		h.Set("Connection", "Upgrade")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Set("Origin", "http://example.com")
 
 		resp, err := ts.Client().Do(req)
 		if err != nil {
@@ -405,7 +404,6 @@ func TestAccept(t *testing.T) {
 		h.Set("Connection", "Upgrade")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Set("Origin", "http://example.com")
 		h.Set("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits")
 
 		resp, err := ts.Client().Do(req)
@@ -418,10 +416,183 @@ func TestAccept(t *testing.T) {
 			t.Errorf("unexpected Sec-Websocket-Extensions header: got %q, want %q", resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate")
 		}
 	})
+
+	t.Run("origin mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := Accept(w, r, nil)
+			if err == nil {
+				t.Error("Accept should have failed for origin mismatch")
+				return
+			}
+		}))
+		defer ts.Close()
+
+		ctx := t.Context()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		if err != nil {
+			t.Fatalf("http.NewRequestWithContext failed: %v", err)
+		}
+		h := req.Header
+		h.Set("Upgrade", "websocket")
+		h.Set("Connection", "Upgrade")
+		h.Set("Origin", "http://example.com")
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("http.Client.Do failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, http.StatusForbidden)
+		}
+	})
 }
 
 func BenchmarkAcceptHeader(b *testing.B) {
 	for b.Loop() {
 		acceptHeader("dGhlIHNhbXBsZSBub25jZQ==")
+	}
+}
+
+func TestValidateOrigin(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		origin   string
+		host     string
+		patterns []string
+		success  bool
+	}{
+		{
+			name:    "none",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "invalid origin",
+			origin:  "$#)(*)$#@*$(#@*$)#@*%)#(@*%)#(@%#@$#@$#$#@$#@}{}{}",
+			host:    "example.com",
+			success: false,
+		},
+		{
+			name:    "invalid port number",
+			origin:  "http://foo.example.com:invalidport",
+			host:    "example.com",
+			success: false,
+		},
+		{
+			name:    "host mismatch",
+			origin:  "http://example.com",
+			host:    "example1.com",
+			success: false,
+		},
+		{
+			name:    "host match",
+			origin:  "http://example.com",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "host is case-insensitive",
+			origin:  "https://examplE.com",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:   "origin patterns",
+			origin: "https://two.examplE.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://*.example.com",
+				"https://bar.com",
+			},
+			success: true,
+		},
+		{
+			name:   "scheme mismatch",
+			origin: "https://two.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"http://*.example.com",
+			},
+			success: false,
+		},
+		{
+			name:   "origin patterns with scheme and port",
+			origin: "https://foo.example.com:8443",
+			host:   "example.com",
+			patterns: []string{
+				"https://foo.example.com:8443",
+			},
+			success: true,
+		},
+		{
+			name:   "port mismatch",
+			origin: "https://foo.example.com:8443",
+			host:   "example.com",
+			patterns: []string{
+				"https://foo.example.com:443",
+			},
+			success: false,
+		},
+		{
+			name:   "default port matches",
+			origin: "https://foo.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://foo.example.com:443",
+			},
+			success: true,
+		},
+		{
+			name:   "wildcard pattern does not match multiple subdomains",
+			origin: "https://bar.foo.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"https://*.example.com",
+			},
+			success: false,
+		},
+		{
+			name:   "wildcard pattern does not match root domain",
+			origin: "https://example.org",
+			host:   "example.com",
+			patterns: []string{
+				"https://*.example.org",
+			},
+			success: false,
+		},
+		{
+			name:   "invalid pattern",
+			origin: "https://foo.example.com",
+			host:   "example.com",
+			patterns: []string{
+				"$#)(*)$#@*$(#@*$)#@*%)#(@*%)#(@%#@$#@$#$#@$#@}{}{}",
+			},
+			success: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+
+			r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://"+tc.host, nil)
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
+
+			err := validateOrigin(r, tc.patterns)
+			if (err == nil) != tc.success {
+				t.Fatalf("validateOrigin() error = %v, want success = %v", err, tc.success)
+			}
+		})
 	}
 }
