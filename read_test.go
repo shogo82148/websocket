@@ -659,3 +659,100 @@ func TestLimitReader(t *testing.T) {
 		}
 	})
 }
+
+func BenchmarkConnReader(b *testing.B) {
+	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig) []byte {
+		rwc := new(testReadWriteCloser)
+		config.rwc = rwc
+		config.br = bufio.NewReader(rwc)
+		config.bw = bufio.NewWriter(rwc)
+		conn := newConn(config)
+		if err := conn.Write(ctx, typ, payload); err != nil {
+			b.Fatalf("failed to prepare test input: %v", err)
+		}
+		return rwc.w.Bytes()
+	}
+
+	b.Run("read a text frame on the server", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageText, payload, connConfig{client: true})
+		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
+		buf := make([]byte, 1024)
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, r, err := conn.Reader(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+			for {
+				_, err := r.Read(buf)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					b.Fatalf("Read failed: %v", err)
+				}
+			}
+		}
+	})
+
+	b.Run("read a text frame on the client", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageText, payload, connConfig{})
+		conn, rwc := newTestConnWithInput(b, frame)
+		buf := make([]byte, 1024)
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, r, err := conn.Reader(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+			for {
+				_, err := r.Read(buf)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					b.Fatalf("Read failed: %v", err)
+				}
+			}
+		}
+	})
+
+	b.Run("read a binary frame on the server", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true})
+		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
+		buf := make([]byte, 1024)
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, r, err := conn.Reader(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+			for {
+				_, err := r.Read(buf)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					b.Fatalf("Read failed: %v", err)
+				}
+			}
+		}
+	})
+}
