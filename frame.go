@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math/bits"
+	"slices"
 )
 
 type opCode byte
@@ -338,14 +339,17 @@ func (c *Conn) writeFrameHeader(h frameHeader) error {
 	}
 
 	// Write the extended payload length if necessary.
-	var buf [8]byte
 	switch payloadLen {
 	case 126:
-		binary.BigEndian.PutUint16(buf[:], uint16(h.payloadLen))
+		buf := bw.AvailableBuffer()
+		buf = slices.Grow(buf, 2)
+		binary.BigEndian.PutUint16(buf[:2], uint16(h.payloadLen))
 		if _, err := bw.Write(buf[:2]); err != nil {
 			return err
 		}
 	case 127:
+		buf := bw.AvailableBuffer()
+		buf = slices.Grow(buf, 8)
 		binary.BigEndian.PutUint64(buf[:8], uint64(h.payloadLen))
 		if _, err := bw.Write(buf[:8]); err != nil {
 			return err
@@ -354,6 +358,8 @@ func (c *Conn) writeFrameHeader(h frameHeader) error {
 
 	// Write the mask key if necessary.
 	if h.mask {
+		buf := bw.AvailableBuffer()
+		buf = slices.Grow(buf, 4)
 		binary.BigEndian.PutUint32(buf[:4], h.maskKey)
 		if _, err := bw.Write(buf[:4]); err != nil {
 			return err
