@@ -168,7 +168,7 @@ func getFlateWriter(w io.Writer, level int) (*flate.Writer, error) {
 	if level < flate.HuffmanOnly || level > flate.BestCompression {
 		return nil, fmt.Errorf("flate: invalid compression level: %d", level)
 	}
-	fw, ok := flateWriterPool[level+2].Get().(*flate.Writer)
+	fw, ok := flateWriterPool[level-flate.HuffmanOnly].Get().(*flate.Writer)
 	if !ok {
 		return flate.NewWriter(w, level)
 	}
@@ -180,7 +180,7 @@ func putFlateWriter(fw *flate.Writer, level int) {
 	if level < flate.HuffmanOnly || level > flate.BestCompression {
 		return
 	}
-	flateWriterPool[level+2].Put(fw)
+	flateWriterPool[level-flate.HuffmanOnly].Put(fw)
 }
 
 type slidingWindow struct {
