@@ -8,8 +8,25 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 	"unicode/utf8"
 )
+
+var writeBufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+func getWriteBuf() *bytes.Buffer {
+	buf := writeBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func putWriteBuf(buf *bytes.Buffer) {
+	writeBufPool.Put(buf)
+}
 
 type messageWriter struct {
 	ctx    context.Context
@@ -183,7 +200,9 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 
 // writeCompressedFrame writes a compressed frame to the connection.
 func (c *Conn) writeCompressedFrame(ctx context.Context, opCode opCode, data []byte) error {
-	buf := new(bytes.Buffer)
+	buf := getWriteBuf()
+	defer putWriteBuf(buf)
+
 	flateWriter, err := flate.NewWriter(buf, flate.DefaultCompression)
 	if err != nil {
 		return err
