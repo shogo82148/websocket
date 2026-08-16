@@ -47,6 +47,7 @@ type Conn struct {
 	// for handling compression
 	copts          *compressionOptions
 	flateThreshold int
+	flateLevel     int
 
 	// for synchronizing reads
 	readerMu      *mutex
@@ -105,6 +106,7 @@ type connConfig struct {
 	skipValidateUTF8 bool
 	copts            *compressionOptions
 	flateThreshold   int
+	flateLevel       int
 	onPingReceived   func(context.Context, []byte) bool
 	onPongReceived   func(context.Context, []byte)
 
@@ -128,6 +130,7 @@ func newConn(cfg connConfig) *Conn {
 		skipValidateUTF8: cfg.skipValidateUTF8,
 		copts:            cfg.copts,
 		flateThreshold:   cfg.flateThreshold,
+		flateLevel:       cfg.flateLevel,
 		onPingReceived:   cfg.onPingReceived,
 		onPongReceived:   cfg.onPongReceived,
 		pings:            make(map[string]chan struct{}),

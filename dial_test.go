@@ -194,7 +194,7 @@ func TestVerifyServerResponse(t *testing.T) {
 		t.Parallel()
 
 		resp := validResponse()
-		if err := verifyServerResponse(resp, key, nil); err != nil {
+		if _, err := verifyServerResponse(resp, key, nil, nil); err != nil {
 			t.Fatalf("verifyServerResponse failed: %v", err)
 		}
 	})
@@ -204,7 +204,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Set("Sec-Websocket-Accept", "invalid")
-		err := verifyServerResponse(resp, key, nil)
+		_, err := verifyServerResponse(resp, key, nil, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with invalid Sec-Websocket-Accept")
 		}
@@ -218,7 +218,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Del("Upgrade")
-		err := verifyServerResponse(resp, key, nil)
+		_, err := verifyServerResponse(resp, key, nil, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with missing Upgrade header")
 		}
@@ -232,7 +232,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Del("Connection")
-		err := verifyServerResponse(resp, key, nil)
+		_, err := verifyServerResponse(resp, key, nil, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with missing Connection header")
 		}
@@ -246,7 +246,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Set("Sec-Websocket-Protocol", "video")
-		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat"}})
+		_, err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat"}}, nil)
 		if err == nil || !strings.Contains(err.Error(), "unsupported subprotocol") {
 			t.Fatalf("error = %v; want unsupported subprotocol error", err)
 		}
@@ -257,9 +257,9 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Set("Sec-Websocket-Protocol", "chat, superchat")
-		err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat", "superchat"}})
-		if err == nil || !strings.Contains(err.Error(), "invalid Sec-Websocket-Protocol") {
-			t.Fatalf("error = %v; want invalid subprotocol response error", err)
+		_, err := verifyServerResponse(resp, key, &DialOptions{Subprotocols: []string{"chat", "superchat"}}, nil)
+		if err == nil || !strings.Contains(err.Error(), "unsupported subprotocol") {
+			t.Fatalf("error = %v; want unsupported subprotocol error", err)
 		}
 	})
 }
@@ -293,7 +293,7 @@ func TestHandshakeRequest(t *testing.T) {
 		})
 
 		opts := &DialOptions{HTTPClient: &http.Client{Transport: transport}}
-		resp, err := handshakeRequest(context.Background(), "wss://example.com/ws", "fixed-key", opts)
+		resp, err := handshakeRequest(context.Background(), "wss://example.com/ws", "fixed-key", opts, nil)
 		if err != nil {
 			t.Fatalf("handshakeRequest failed: %v", err)
 		}
