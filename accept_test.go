@@ -514,8 +514,9 @@ func TestValidateOrigin(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			ctx := t.Context()
 
-			r := httptest.NewRequest(http.MethodGet, "http://"+tc.host, nil)
+			r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://"+tc.host, nil)
 			if tc.origin != "" {
 				r.Header.Set("Origin", tc.origin)
 			}
