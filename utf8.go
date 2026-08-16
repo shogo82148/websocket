@@ -268,12 +268,16 @@ func (w *utf8Writer) Write(p []byte) (int, error) {
 
 // Close closes the underlying writer.
 func (w *utf8Writer) Close() error {
+	var err error
 	if w.state != 0 {
 		w.conn.abnormalClosure(w.ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
-		return CloseError{
+		err = CloseError{
 			Code:   StatusInvalidFramePayloadData,
 			Reason: "invalid UTF-8",
 		}
 	}
-	return w.w.Close()
+	if err0 := w.w.Close(); err == nil {
+		err = err0
+	}
+	return err
 }
