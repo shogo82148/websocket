@@ -124,9 +124,13 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 		c.flateReader.reset(r, c.flateReadContextTakeover())
 		r = c.flateReader
 	}
-	lr := c.limitReader
-	lr.reset(ctx, r)
-	return MessageType(h.opCode), lr, nil
+	c.limitReader.reset(ctx, r)
+	r = c.limitReader
+	if h.opCode == opText && !c.skipValidateUTF8 {
+		c.utf8Reader.reset(ctx, r)
+		r = c.utf8Reader
+	}
+	return MessageType(h.opCode), r, nil
 }
 
 func (c *Conn) flateReadContextTakeover() bool {

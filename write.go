@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"unicode/utf8"
 )
 
 type messageWriter struct {
@@ -136,8 +137,12 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 		return nil, err
 	}
 
-	w := c.msgWriter
-	w.reset(ctx, opCode)
+	c.msgWriter.reset(ctx, opCode)
+	w := io.WriteCloser(c.msgWriter)
+	if opCode == opText && !c.skipValidateUTF8 {
+		c.utf8Writer.reset(ctx, w)
+		w = c.utf8Writer
+	}
 	return w, nil
 }
 
@@ -158,6 +163,16 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 		return err
 	}
 	defer c.writerMu.unlock()
+
+	if opCode == opText && !c.skipValidateUTF8 {
+		if !utf8.Valid(data) {
+			c.abnormalClosure(ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
+			return CloseError{
+				Code:   StatusInvalidFramePayloadData,
+				Reason: "invalid UTF-8",
+			}
+		}
+	}
 
 	if c.flate() && len(data) >= c.flateThreshold {
 		return c.writeCompressedFrame(ctx, opCode, data)
