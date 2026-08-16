@@ -194,7 +194,7 @@ func TestVerifyServerResponse(t *testing.T) {
 		t.Parallel()
 
 		resp := validResponse()
-		if _, err := verifyServerResponse(resp, key, nil, nil); err != nil {
+		if _, err := verifyServerResponse(resp, key, &DialOptions{}, nil); err != nil {
 			t.Fatalf("verifyServerResponse failed: %v", err)
 		}
 	})
@@ -204,7 +204,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Set("Sec-Websocket-Accept", "invalid")
-		_, err := verifyServerResponse(resp, key, nil, nil)
+		_, err := verifyServerResponse(resp, key, &DialOptions{}, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with invalid Sec-Websocket-Accept")
 		}
@@ -218,7 +218,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Del("Upgrade")
-		_, err := verifyServerResponse(resp, key, nil, nil)
+		_, err := verifyServerResponse(resp, key, &DialOptions{}, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with missing Upgrade header")
 		}
@@ -232,7 +232,7 @@ func TestVerifyServerResponse(t *testing.T) {
 
 		resp := validResponse()
 		resp.Header.Del("Connection")
-		_, err := verifyServerResponse(resp, key, nil, nil)
+		_, err := verifyServerResponse(resp, key, &DialOptions{}, nil)
 		if err == nil {
 			t.Fatal("verifyServerResponse succeeded with missing Connection header")
 		}
