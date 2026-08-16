@@ -230,6 +230,59 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Reader error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+
+	t.Run("unexpected RSV bits return error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x91, 0x05, 'h', 'e', 'l', 'l', 'o'} // RSV1 bit set unexpectedly
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("received unmasked frame returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'} // unmasked frame
+		conn, _ := newTestConnWithInput(t, frame)
+		conn.client = false // disable masking for outgoing frames
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("received masked frame returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d, 'h', 'e', 'l', 'l', 'o'} // masked frame
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("unexpected opcode returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x8f, 0x00} // invalid opcode 0x0f
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
 }
 
 func TestConnRead(t *testing.T) {
