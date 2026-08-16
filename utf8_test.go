@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"unicode/utf8"
 )
 
@@ -36,7 +37,7 @@ func TestUTF8Reader(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", tc.input), func(t *testing.T) {
 			ctx := t.Context()
 			conn, _ := newTestConnWithInput(t, []byte{})
-			r := strings.NewReader(tc.input)
+			r := iotest.OneByteReader(strings.NewReader(tc.input))
 			reader := &utf8Reader{ctx: ctx, r: r, conn: conn}
 			got, err := io.ReadAll(reader)
 			if (err == nil) != tc.valid {
@@ -51,9 +52,11 @@ func TestUTF8Reader(t *testing.T) {
 
 func TestUTF8Writer(t *testing.T) {
 	write := func(w io.WriteCloser, data []byte) error {
-		_, err := w.Write(data)
-		if err != nil {
-			return err
+		for _, b := range data {
+			_, err := w.Write([]byte{b})
+			if err != nil {
+				return err
+			}
 		}
 		return w.Close()
 	}
@@ -83,7 +86,7 @@ func FuzzUTF8Reader(f *testing.F) {
 		valid := utf8.ValidString(input)
 		ctx := t.Context()
 		conn, _ := newTestConnWithInput(t, []byte{})
-		r := strings.NewReader(input)
+		r := iotest.OneByteReader(strings.NewReader(input))
 		reader := &utf8Reader{ctx: ctx, r: r, conn: conn}
 		_, err := io.Copy(io.Discard, reader)
 		if (err == nil) != valid {
@@ -93,21 +96,41 @@ func FuzzUTF8Reader(f *testing.F) {
 }
 
 func BenchmarkUTF8Reader(b *testing.B) {
-	var r strings.Reader
-	input := strings.Repeat("Hello, 世界🍺", 1000)
-	ctx := b.Context()
-	conn, _ := newTestConnWithInput(b, []byte{})
-	reader := &utf8Reader{conn: conn}
-	b.ResetTimer()
-	b.SetBytes(int64(len(input)))
-	for b.Loop() {
-		r.Reset(input)
-		reader.reset(ctx, &r)
-		_, err := io.Copy(io.Discard, reader)
-		if err != nil {
-			b.Fatalf("io.Copy failed: %v", err)
+	b.Run("grouped", func(b *testing.B) {
+		var r strings.Reader
+		input := strings.Repeat("Hello, 世界🍺", 1000)
+		ctx := b.Context()
+		conn, _ := newTestConnWithInput(b, []byte{})
+		reader := &utf8Reader{conn: conn}
+		b.ResetTimer()
+		b.SetBytes(int64(len(input)))
+		for b.Loop() {
+			r.Reset(input)
+			reader.reset(ctx, &r)
+			_, err := io.Copy(io.Discard, reader)
+			if err != nil {
+				b.Fatalf("io.Copy failed: %v", err)
+			}
 		}
-	}
+	})
+
+	b.Run("one-byte", func(b *testing.B) {
+		var r strings.Reader
+		input := strings.Repeat("Hello, 世界🍺", 1000)
+		ctx := b.Context()
+		conn, _ := newTestConnWithInput(b, []byte{})
+		reader := &utf8Reader{conn: conn}
+		b.ResetTimer()
+		b.SetBytes(int64(len(input)))
+		for b.Loop() {
+			r.Reset(input)
+			reader.reset(ctx, iotest.OneByteReader(&r))
+			_, err := io.Copy(io.Discard, reader)
+			if err != nil {
+				b.Fatalf("io.Copy failed: %v", err)
+			}
+		}
+	})
 }
 
 func BenchmarkUTF8(b *testing.B) {
