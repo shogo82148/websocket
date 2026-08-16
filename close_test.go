@@ -210,8 +210,8 @@ func TestConnCloseHandshake(t *testing.T) {
 			t.Fatalf("underlying Close call count = %d; want 1", got)
 		}
 
-		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
-		h, err := readFrameHeader(br)
+		peer, _ := newTestConnWithInput(t, rwc.w.Bytes())
+		h, err := peer.readFrameHeader()
 		if err != nil {
 			t.Fatalf("failed to read sent close frame: %v", err)
 		}
@@ -219,7 +219,7 @@ func TestConnCloseHandshake(t *testing.T) {
 			t.Fatalf("sent frame header = %+v; want final, masked close frame", h)
 		}
 		payload := make([]byte, h.payloadLen)
-		if _, err := io.ReadFull(br, payload); err != nil {
+		if _, err := io.ReadFull(peer.br, payload); err != nil {
 			t.Fatalf("failed to read sent close payload: %v", err)
 		}
 		maskFramePayload(payload, h.maskKey)
@@ -244,8 +244,8 @@ func TestConnCloseHandshake(t *testing.T) {
 			t.Fatalf("received close = %+v; want going away with reason", ce)
 		}
 
-		br := bufio.NewReader(bytes.NewReader(rwc.w.Bytes()))
-		h, err := readFrameHeader(br)
+		peer, _ := newTestConnWithInput(t, rwc.w.Bytes())
+		h, err := peer.readFrameHeader()
 		if err != nil {
 			t.Fatalf("peer-initiated close produced no response frame: %v", err)
 		}
@@ -253,7 +253,7 @@ func TestConnCloseHandshake(t *testing.T) {
 			t.Fatalf("response opcode = %v; want close", h.opCode)
 		}
 		payload := make([]byte, h.payloadLen)
-		if _, err := io.ReadFull(br, payload); err != nil {
+		if _, err := io.ReadFull(peer.br, payload); err != nil {
 			t.Fatalf("failed to read response close payload: %v", err)
 		}
 		if h.mask {
@@ -281,8 +281,13 @@ func TestConnCloseHandshake(t *testing.T) {
 
 		peerErr := make(chan error, 1)
 		go func() {
-			br := bufio.NewReader(peer)
-			h, err := readFrameHeader(br)
+			peerConn := newConn(connConfig{
+				rwc:    peer,
+				client: false,
+				br:     bufio.NewReader(peer),
+				bw:     bufio.NewWriter(peer),
+			})
+			h, err := peerConn.readFrameHeader()
 			if err != nil {
 				peerErr <- err
 				return
@@ -291,7 +296,7 @@ func TestConnCloseHandshake(t *testing.T) {
 				peerErr <- errors.New("received frame is not a close frame")
 				return
 			}
-			if _, err := io.CopyN(io.Discard, br, h.payloadLen); err != nil {
+			if _, err := io.CopyN(io.Discard, peerConn.br, h.payloadLen); err != nil {
 				peerErr <- err
 				return
 			}
