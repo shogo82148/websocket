@@ -197,6 +197,27 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 	return c.closeReadCtx
 }
 
+func (c *Conn) validRSVBits(h frameHeader) bool {
+	// RSV2 and RSV3 are reserved for future extensions.
+	if h.rsv2 || h.rsv3 {
+		return false
+	}
+
+	// RSV1 is used for permessage-deflate compression.
+	if h.rsv1 {
+		// If compression is disabled, RSV1 MUST NOT be set.
+		if !c.flate() {
+			return false
+		}
+		// rsv1 is only allowed on data frames beginning messages.
+		if h.opCode != opText && h.opCode != opBinary {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 	for {
 		h, err := readFrameHeader(c.br)
@@ -205,8 +226,17 @@ func (c *Conn) readLoop(ctx context.Context) (frameHeader, error) {
 		}
 
 		// verify the frame header
+		if !c.validRSVBits(h) {
+			c.abnormalClosure(ctx, StatusProtocolError, "received header with unexpected rsv bits set")
+			return frameHeader{}, fmt.Errorf("websocket: received header with unexpected rsv bits set: rsv1=%v, rsv2=%v, rsv3=%v", h.rsv1, h.rsv2, h.rsv3)
+		}
 		if !c.client && !h.mask {
+			c.abnormalClosure(ctx, StatusProtocolError, "received unmasked frame from client")
 			return frameHeader{}, errors.New("websocket: received unmasked frame from client")
+		}
+		if c.client && h.mask {
+			c.abnormalClosure(ctx, StatusProtocolError, "received masked frame from server")
+			return frameHeader{}, errors.New("websocket: received masked frame from server")
 		}
 
 		switch h.opCode {

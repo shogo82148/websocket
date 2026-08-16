@@ -230,6 +230,59 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Reader error = %v; want wrapping %v", err, context.DeadlineExceeded)
 		}
 	})
+
+	t.Run("unexpected RSV bits return error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x91, 0x05, 'h', 'e', 'l', 'l', 'o'} // RSV1 bit set unexpectedly
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("received unmasked frame returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'} // unmasked frame
+		conn, _ := newTestConnWithInput(t, frame)
+		conn.client = false // disable masking for outgoing frames
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("received masked frame returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d, 'h', 'e', 'l', 'l', 'o'} // masked frame
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
+
+	t.Run("unexpected opcode returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x8f, 0x00} // invalid opcode 0x0f
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
 }
 
 func TestConnRead(t *testing.T) {
@@ -754,5 +807,40 @@ func BenchmarkConnReader(b *testing.B) {
 				}
 			}
 		}
+	})
+}
+
+func FuzzConnReader(f *testing.F) {
+	f.Add([]byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}, true, false, false)
+	f.Add([]byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}, true, false, false)
+	f.Add([]byte{0x81, 0x00}, true, false, false)
+	f.Add([]byte{0x81, 0x85, 0x01, 0x02, 0x03, 0x04, 0x69, 0x67, 0x6f, 0x68, 0x6e}, false, false, false)
+	f.Add([]byte{0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}, true, true, false)
+	f.Add([]byte{0x41, 0x03, 0xf2, 0x48, 0xcd, 0x80, 0x04, 0xc9, 0xc9, 0x07, 0x00}, true, true, false)
+
+	f.Fuzz(func(t *testing.T, frame []byte, client, compressed, contextTakeover bool) {
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		config := connConfig{
+			rwc:    rwc,
+			client: client,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		}
+		if compressed {
+			config.copts = &compressionOptions{
+				clientNoContextTakeover: contextTakeover,
+				serverNoContextTakeover: contextTakeover,
+			}
+		}
+		conn := newConn(config)
+		_, r, err := conn.Reader(t.Context())
+		if err != nil {
+			return
+		}
+		io.Copy(io.Discard, r)
 	})
 }
