@@ -295,7 +295,7 @@ func parseOrigin(s string) (originType, error) {
 	var origin originType
 	u, err := url.Parse(s)
 	if err != nil {
-		return origin, fmt.Errorf("websocket: failed to parse origin: %w", err)
+		return originType{}, fmt.Errorf("websocket: failed to parse origin: %w", err)
 	}
 
 	switch {
@@ -306,7 +306,7 @@ func parseOrigin(s string) (originType, error) {
 		origin.scheme = "https"
 		origin.port = 443 // default port for https
 	default:
-		return origin, fmt.Errorf("websocket: unsupported origin scheme: %q", u.Scheme)
+		return originType{}, fmt.Errorf("websocket: unsupported origin scheme: %q", u.Scheme)
 	}
 
 	// host is case-insensitive, so we convert it to lowercase for comparison.
@@ -315,7 +315,7 @@ func parseOrigin(s string) (originType, error) {
 	if port := u.Port(); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return origin, fmt.Errorf("websocket: invalid origin port: %w", err)
+			return originType{}, fmt.Errorf("websocket: invalid origin port: %w", err)
 		}
 		origin.port = p
 	}
