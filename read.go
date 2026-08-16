@@ -198,7 +198,7 @@ func (c *Conn) CloseRead(ctx context.Context) context.Context {
 }
 
 func (c *Conn) validRSVBits(h frameHeader) bool {
-	// RSV1 and RSV3 are reserved for future extensions.
+	// RSV2 and RSV3 are reserved for future extensions.
 	if h.rsv2 || h.rsv3 {
 		return false
 	}
