@@ -31,7 +31,7 @@ func (r *blockedReadWriteCloser) Close() error {
 	return nil
 }
 
-func newTestConnWithInput(t *testing.T, input []byte) (*Conn, *testReadWriteCloser) {
+func newTestConnWithInput(t testing.TB, input []byte) (*Conn, *testReadWriteCloser) {
 	t.Helper()
 
 	rwc := new(testReadWriteCloser)

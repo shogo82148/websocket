@@ -46,6 +46,13 @@ type DialOptions struct {
 
 	// OnPongReceived is an optional callback invoked synchronously when a pong frame is received.
 	OnPongReceived func(ctx context.Context, payload []byte)
+
+	// SkipValidateUTF8 disables UTF-8 validation for text messages.
+	// This is useful for performance reasons if you know
+	// that the text messages are valid UTF-8.
+	//
+	// Defaults to false.
+	SkipValidateUTF8 bool
 }
 
 func (opts *DialOptions) cloneWithDefaults(ctx context.Context) (context.Context, context.CancelFunc, *DialOptions) {
@@ -129,13 +136,14 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	}
 
 	return newConn(connConfig{
-		rwc:            rwc,
-		client:         true,
-		subprotocol:    subprotocol,
-		onPingReceived: opts.OnPingReceived,
-		onPongReceived: opts.OnPongReceived,
-		br:             bufio.NewReader(rwc),
-		bw:             bufio.NewWriter(rwc),
+		rwc:              rwc,
+		client:           true,
+		subprotocol:      subprotocol,
+		skipValidateUTF8: opts.SkipValidateUTF8,
+		onPingReceived:   opts.OnPingReceived,
+		onPongReceived:   opts.OnPongReceived,
+		br:               bufio.NewReader(rwc),
+		bw:               bufio.NewWriter(rwc),
 	}), resp, nil
 }
 

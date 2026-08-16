@@ -52,6 +52,13 @@ type AcceptOptions struct {
 
 	// OnPongReceived is an optional callback invoked synchronously when a pong frame is received.
 	OnPongReceived func(ctx context.Context, payload []byte)
+
+	// SkipValidateUTF8 disables UTF-8 validation for text messages.
+	// This is useful for performance reasons if you know
+	// that the text messages are valid UTF-8.
+	//
+	// Defaults to false.
+	SkipValidateUTF8 bool
 }
 
 func (opts *AcceptOptions) cloneWithDefaults() *AcceptOptions {
@@ -168,13 +175,14 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	brw.Reader.Reset(io.MultiReader(bytes.NewReader(b), conn))
 
 	return newConn(connConfig{
-		rwc:            conn,
-		client:         false,
-		subprotocol:    subprotocol,
-		copts:          copts,
-		flateThreshold: opts.CompressionThreshold,
-		onPingReceived: opts.OnPingReceived,
-		onPongReceived: opts.OnPongReceived,
+		rwc:              conn,
+		client:           false,
+		subprotocol:      subprotocol,
+		skipValidateUTF8: opts.SkipValidateUTF8,
+		copts:            copts,
+		flateThreshold:   opts.CompressionThreshold,
+		onPingReceived:   opts.OnPingReceived,
+		onPongReceived:   opts.OnPongReceived,
 
 		br: brw.Reader,
 		bw: brw.Writer,

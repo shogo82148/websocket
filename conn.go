@@ -41,6 +41,9 @@ type Conn struct {
 	// subprotocol is the subprotocol negotiated during the handshake.
 	subprotocol string
 
+	// skipValidateUTF8 is true if the connection should skip UTF-8 validation for text messages.
+	skipValidateUTF8 bool
+
 	// for handling compression
 	copts          *compressionOptions
 	flateThreshold int
@@ -50,6 +53,7 @@ type Conn struct {
 	msgReader     *messageReader
 	flateReader   *flateReader
 	limitReader   *limitReader
+	utf8Reader    *utf8Reader
 	closeReadOnce sync.Once
 	closeReadCtx  context.Context
 
@@ -57,6 +61,7 @@ type Conn struct {
 	writerMu     *mutex
 	writeFrameMu *mutex
 	msgWriter    *messageWriter
+	utf8Writer   *utf8Writer
 
 	// for handling ping and pong control frames
 	onPingReceived func(context.Context, []byte) bool
@@ -92,13 +97,14 @@ type conn struct {
 }
 
 type connConfig struct {
-	rwc            io.ReadWriteCloser
-	client         bool
-	subprotocol    string
-	copts          *compressionOptions
-	flateThreshold int
-	onPingReceived func(context.Context, []byte) bool
-	onPongReceived func(context.Context, []byte)
+	rwc              io.ReadWriteCloser
+	client           bool
+	subprotocol      string
+	skipValidateUTF8 bool
+	copts            *compressionOptions
+	flateThreshold   int
+	onPingReceived   func(context.Context, []byte) bool
+	onPongReceived   func(context.Context, []byte)
 
 	br *bufio.Reader
 	bw *bufio.Writer
@@ -116,12 +122,13 @@ func newConn(cfg connConfig) *Conn {
 
 			closed: closed,
 		},
-		subprotocol:    cfg.subprotocol,
-		copts:          cfg.copts,
-		flateThreshold: cfg.flateThreshold,
-		onPingReceived: cfg.onPingReceived,
-		onPongReceived: cfg.onPongReceived,
-		pings:          make(map[string]chan struct{}),
+		subprotocol:      cfg.subprotocol,
+		skipValidateUTF8: cfg.skipValidateUTF8,
+		copts:            cfg.copts,
+		flateThreshold:   cfg.flateThreshold,
+		onPingReceived:   cfg.onPingReceived,
+		onPongReceived:   cfg.onPongReceived,
+		pings:            make(map[string]chan struct{}),
 
 		readerMu:     newMutex(closed),
 		writerMu:     newMutex(closed),
@@ -130,7 +137,9 @@ func newConn(cfg connConfig) *Conn {
 
 	c.msgReader = newMessageReader(c)
 	c.limitReader = newLimitReader(c, 32*1024) // default read limit is 32KiB
+	c.utf8Reader = &utf8Reader{conn: c}
 	c.msgWriter = newMessageWriter(c)
+	c.utf8Writer = &utf8Writer{conn: c}
 	if c.flate() {
 		c.flateReader = new(flateReader)
 	}
