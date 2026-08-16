@@ -162,7 +162,7 @@ func putFlateReader(fr io.Reader) {
 	flateReaderPool.Put(fr)
 }
 
-var flateWriterPool = [11]sync.Pool{}
+var flateWriterPool = [flate.BestCompression - flate.HuffmanOnly + 1]sync.Pool{}
 
 func getFlateWriter(w io.Writer, level int) (*flate.Writer, error) {
 	if level < flate.HuffmanOnly || level > flate.BestCompression {
