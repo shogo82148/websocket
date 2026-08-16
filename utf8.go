@@ -262,8 +262,7 @@ func (w *utf8Writer) Write(p []byte) (int, error) {
 			Reason: "invalid UTF-8",
 		}
 	}
-	n, err := w.w.Write(p)
-	return n, err
+	return w.w.Write(p)
 }
 
 // Close closes the underlying writer.
