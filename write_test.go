@@ -294,6 +294,27 @@ func TestConnWrite(t *testing.T) {
 		}
 	})
 
+	t.Run("writes a large payload in a single frame", func(t *testing.T) {
+		t.Parallel()
+		rwc := new(testReadWriteCloser)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true, // client connections must mask frames
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+
+		payload := bytes.Repeat([]byte{'a'}, 64*1024) // 64KB payload
+		if err := conn.Write(t.Context(), MessageText, payload); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		got := rwc.w.Bytes()
+		if got[1]&0x80 == 0 {
+			t.Fatal("frame is not masked")
+		}
+	})
+
 	t.Run("rejects invalid message type", func(t *testing.T) {
 		t.Parallel()
 		rwc := new(testReadWriteCloser)

@@ -86,6 +86,7 @@ type conn struct {
 	readCanceledErr  error
 	writeWatcher     chan<- context.Context
 	writeFinished    chan<- struct{}
+	writeBuf         [8]byte
 	writeCanceledMu  sync.Mutex
 	writeCanceledErr error
 
