@@ -416,6 +416,41 @@ func TestAccept(t *testing.T) {
 			t.Errorf("unexpected Sec-Websocket-Extensions header: got %q, want %q", resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate")
 		}
 	})
+
+	t.Run("origin mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := Accept(w, r, nil)
+			if err == nil {
+				t.Error("Accept should have failed for origin mismatch")
+				return
+			}
+		}))
+		defer ts.Close()
+
+		ctx := t.Context()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		if err != nil {
+			t.Fatalf("http.NewRequestWithContext failed: %v", err)
+		}
+		h := req.Header
+		h.Set("Upgrade", "websocket")
+		h.Set("Connection", "Upgrade")
+		h.Set("Origin", "http://example.com")
+		h.Set("Sec-Websocket-Version", "13")
+		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("http.Client.Do failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, http.StatusForbidden)
+		}
+	})
 }
 
 func BenchmarkAcceptHeader(b *testing.B) {
