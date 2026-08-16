@@ -221,27 +221,59 @@ func (c *Conn) writeFrame(ctx context.Context, fin, flate bool, opCode opCode, d
 		payloadLen: int64(len(data)),
 	}
 
-	framePayload := data
 	if h.mask {
-		var maskKey [4]byte
-		rand.Read(maskKey[:])
-		h.maskKey = binary.BigEndian.Uint32(maskKey[:])
-		framePayload = append([]byte(nil), data...)
-		maskFramePayload(framePayload, h.maskKey)
+		// generate mask key
+		buf := c.writeBuf[:]
+		rand.Read(buf[:4])
+		h.maskKey = binary.BigEndian.Uint32(buf[:4])
 	}
 
+	// Write the frame header.
 	if err := c.writeFrameHeader(h); err != nil {
 		if cerr := c.canceledWrite(); cerr != nil {
 			return cerr
 		}
 		return err
 	}
-	if _, err := c.bw.Write(framePayload); err != nil {
-		if cerr := c.canceledWrite(); cerr != nil {
-			return cerr
+
+	// Write the frame payload.
+	if h.mask {
+		maskKey := h.maskKey
+		for len(data) > 0 {
+			// fill the available buffer.
+			buf := c.bw.AvailableBuffer()
+			l := min(cap(buf), len(data))
+			buf = append(buf, data[:l]...)
+			data = data[l:]
+
+			// Mask the payload in place and write it to the buffer.
+			maskKey = maskFramePayload(buf, maskKey)
+			if _, err := c.bw.Write(buf); err != nil {
+				if cerr := c.canceledWrite(); cerr != nil {
+					return cerr
+				}
+				return err
+			}
+
+			if c.bw.Available() == 0 {
+				if err := c.bw.Flush(); err != nil {
+					if cerr := c.canceledWrite(); cerr != nil {
+						return cerr
+					}
+					return err
+				}
+			}
 		}
-		return err
+	} else {
+		// Write the payload directly if not masked.
+		if _, err := c.bw.Write(data); err != nil {
+			if cerr := c.canceledWrite(); cerr != nil {
+				return cerr
+			}
+			return err
+		}
 	}
+
 	if fin {
 		if err := c.bw.Flush(); err != nil {
 			if cerr := c.canceledWrite(); cerr != nil {
