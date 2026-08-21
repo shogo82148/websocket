@@ -96,6 +96,24 @@ func FuzzUTF8Reader(f *testing.F) {
 }
 
 func BenchmarkUTF8Reader(b *testing.B) {
+	b.Run("ascii-only", func(b *testing.B) {
+		var r strings.Reader
+		input := strings.Repeat("Hello, World!", 1000)
+		ctx := b.Context()
+		conn, _ := newTestConnWithInput(b, []byte{})
+		reader := &utf8Reader{conn: conn}
+		b.ResetTimer()
+		b.SetBytes(int64(len(input)))
+		for b.Loop() {
+			r.Reset(input)
+			reader.reset(ctx, &r)
+			_, err := io.Copy(io.Discard, reader)
+			if err != nil {
+				b.Fatalf("io.Copy failed: %v", err)
+			}
+		}
+	})
+
 	b.Run("grouped", func(b *testing.B) {
 		var r strings.Reader
 		input := strings.Repeat("Hello, 世界🍺", 1000)
