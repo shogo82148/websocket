@@ -858,6 +858,111 @@ func BenchmarkConnReader(b *testing.B) {
 	})
 }
 
+func BenchmarkConnRead(b *testing.B) {
+	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig) []byte {
+		rwc := new(testReadWriteCloser)
+		config.rwc = rwc
+		config.br = bufio.NewReader(rwc)
+		config.bw = bufio.NewWriter(rwc)
+		conn := newConn(config)
+		if err := conn.Write(ctx, typ, payload); err != nil {
+			b.Fatalf("failed to prepare test input: %v", err)
+		}
+		return rwc.w.Bytes()
+	}
+
+	b.Run("read a text frame on the server", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageText, payload, connConfig{client: true})
+		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("read a text frame on the client", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageText, payload, connConfig{})
+		conn, rwc := newTestConnWithInput(b, frame)
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("read a binary frame on the server", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true})
+		conn, rwc := newTestConnWithInput(b, frame)
+		conn.client = false // disable masking for outgoing frames
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("read a compressed binary frame on the client", func(b *testing.B) {
+		ctx := b.Context()
+		payload := []byte("Hello, 世界🍺")
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			flateThreshold: 1,
+		})
+		rwc := new(testReadWriteCloser)
+		if _, err := rwc.r.Write(frame); err != nil {
+			b.Fatalf("failed to prepare test input: %v", err)
+		}
+
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			copts: &compressionOptions{
+				clientNoContextTakeover: true,
+				serverNoContextTakeover: true,
+			},
+			br: bufio.NewReader(rwc),
+			bw: bufio.NewWriter(rwc),
+		})
+		b.ResetTimer()
+		b.SetBytes(int64(len(payload)))
+
+		for b.Loop() {
+			rwc.r.Reset()
+			rwc.r.Write(frame)
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				b.Fatalf("Read failed: %v", err)
+			}
+		}
+	})
+}
+
 func FuzzConnReader(f *testing.F) {
 	f.Add([]byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}, true, false, false)
 	f.Add([]byte{0x82, 0x04, 0x01, 0x02, 0x03, 0x04}, true, false, false)
