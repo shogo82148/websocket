@@ -46,6 +46,10 @@ type AcceptOptions struct {
 	// for CompressionContextTakeover.
 	CompressionThreshold int
 
+	// CompressionLevel controls the compression level for the flate.Writer.
+	// Defaults to flate.NoCompression.
+	CompressionLevel int
+
 	// OnPingReceived is an optional callback invoked synchronously when a ping frame is received.
 	// If it returns true, the default pong response will be sent automatically.
 	OnPingReceived func(ctx context.Context, payload []byte) bool
@@ -189,6 +193,7 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 		skipValidateUTF8Write: opts.SkipValidateUTF8Write,
 		copts:                 copts,
 		flateThreshold:        opts.CompressionThreshold,
+		flateLevel:            opts.CompressionLevel,
 		onPingReceived:        opts.OnPingReceived,
 		onPongReceived:        opts.OnPongReceived,
 

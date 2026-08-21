@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -40,6 +41,10 @@ type DialOptions struct {
 	// Defaults to 512 bytes for CompressionNoContextTakeover and 128 bytes
 	// for CompressionContextTakeover.
 	CompressionThreshold int
+
+	// CompressionLevel controls the compression level for the flate.Writer.
+	// Defaults to flate.NoCompression.
+	CompressionLevel int
 
 	// OnPingReceived is an optional callback invoked synchronously when a ping frame is received.
 	OnPingReceived func(ctx context.Context, payload []byte) bool
@@ -127,12 +132,18 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	rand.Read(buf[:])
 	secWebSocketKey := base64.StdEncoding.EncodeToString(buf[:])
 
-	resp, err := handshakeRequest(ctx, u, secWebSocketKey, opts)
+	var copts *compressionOptions
+	if opts.CompressionMode != CompressionDisabled {
+		copts = opts.CompressionMode.opts()
+	}
+
+	resp, err := handshakeRequest(ctx, u, secWebSocketKey, opts, copts)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err := verifyServerResponse(resp, secWebSocketKey, opts); err != nil {
+	copts, err = verifyServerResponse(resp, secWebSocketKey, opts, copts)
+	if err != nil {
 		return nil, readResponseBody(resp), err
 	}
 	subprotocol := resp.Header.Get("Sec-Websocket-Protocol")
@@ -148,6 +159,9 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		subprotocol:           subprotocol,
 		skipValidateUTF8Read:  opts.SkipValidateUTF8Read,
 		skipValidateUTF8Write: opts.SkipValidateUTF8Write,
+		copts:                 copts,
+		flateThreshold:        opts.CompressionThreshold,
+		flateLevel:            opts.CompressionLevel,
 		onPingReceived:        opts.OnPingReceived,
 		onPongReceived:        opts.OnPongReceived,
 		br:                    bufio.NewReader(rwc),
@@ -171,7 +185,7 @@ func readResponseBody(resp *http.Response) *http.Response {
 	return resp
 }
 
-func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *DialOptions) (*http.Response, error) {
+func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *DialOptions, copts *compressionOptions) (*http.Response, error) {
 	// parse the URL and change the scheme from ws/wss to http/https
 	parsed, err := url.Parse(u)
 	if err != nil {
@@ -204,6 +218,9 @@ func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *Dial
 	if len(opts.Subprotocols) > 0 {
 		req.Header.Set("Sec-Websocket-Protocol", strings.Join(opts.Subprotocols, ", "))
 	}
+	if copts != nil {
+		req.Header.Set("Sec-Websocket-Extensions", copts.String())
+	}
 
 	// send the HTTP request
 	resp, err := opts.HTTPClient.Do(req)
@@ -213,33 +230,91 @@ func handshakeRequest(ctx context.Context, u, secWebSocketKey string, opts *Dial
 	return resp, nil
 }
 
-func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *DialOptions) error {
+func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *DialOptions, copts *compressionOptions) (*compressionOptions, error) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return fmt.Errorf("websocket: unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("websocket: unexpected status code: %d", resp.StatusCode)
 	}
 	if !headerContainsTokenIgnoreCase(resp.Header, "Upgrade", "websocket") {
-		return errUpgradeHeaderNotWebSocket
+		return nil, errUpgradeHeaderNotWebSocket
 	}
 	if !headerContainsTokenIgnoreCase(resp.Header, "Connection", "Upgrade") {
-		return errConnectionHeaderNotUpgrade
+		return nil, errConnectionHeaderNotUpgrade
 	}
 	expectedAccept := acceptHeader(secWebSocketKey)
 	if got := resp.Header.Get("Sec-Websocket-Accept"); got != expectedAccept {
-		return fmt.Errorf("websocket: Sec-Websocket-Accept mismatch: got %q, want %q", got, expectedAccept)
+		return nil, fmt.Errorf("websocket: Sec-Websocket-Accept mismatch: got %q, want %q", got, expectedAccept)
 	}
+	if err := verifySubprotocol(opts.Subprotocols, resp); err != nil {
+		return nil, err
+	}
+	return verifyServerExtensions(copts, resp.Header)
+}
+
+func verifySubprotocol(subprotocols []string, resp *http.Response) error {
 	protocols := resp.Header.Values("Sec-Websocket-Protocol")
 	if len(protocols) == 0 {
+		// No subprotocol was negotiated, which is valid if the client did not request any.
 		return nil
 	}
-	if len(protocols) != 1 || strings.Contains(protocols[0], ",") || strings.TrimSpace(protocols[0]) != protocols[0] || protocols[0] == "" {
-		return fmt.Errorf("websocket: invalid Sec-Websocket-Protocol response: %q", protocols)
+	if len(protocols) > 1 {
+		return fmt.Errorf("websocket: multiple Sec-Websocket-Protocol headers: %v", protocols)
 	}
-	var offered []string
-	if opts != nil {
-		offered = opts.Subprotocols
-	}
-	if slices.Contains(offered, protocols[0]) {
+
+	proto := protocols[0]
+	if slices.Contains(subprotocols, proto) {
 		return nil
 	}
-	return fmt.Errorf("websocket: server selected unsupported subprotocol %q", protocols[0])
+
+	return fmt.Errorf("websocket: server selected unsupported subprotocol: %q", proto)
+}
+
+func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compressionOptions, error) {
+	exts := slices.Collect(websocketExtensions(h))
+
+	if len(exts) == 0 {
+		// No extensions were negotiated.
+		return nil, nil
+	}
+
+	ext := exts[0]
+	if ext.name != "permessage-deflate" || len(exts) > 1 || copts == nil {
+		return nil, fmt.Errorf("websocket: unsupported extensions from server: %+v", exts)
+	}
+
+	// clone copts to avoid modifying the original options
+	tmp := *copts
+	copts = &tmp
+
+	seenClientNoContextTakeover := false
+	seenServerNoContextTakeover := false
+	seenServerMaxWindowBits := false
+	for _, p := range ext.params {
+		switch {
+		case p == "client_no_context_takeover":
+			if seenClientNoContextTakeover {
+				return nil, errors.New("websocket: duplicate client_no_context_takeover parameter from server")
+			}
+			seenClientNoContextTakeover = true
+			copts.clientNoContextTakeover = true
+		case p == "server_no_context_takeover":
+			if seenServerNoContextTakeover {
+				return nil, errors.New("websocket: duplicate server_no_context_takeover parameter from server")
+			}
+			seenServerNoContextTakeover = true
+			copts.serverNoContextTakeover = true
+		case strings.HasPrefix(p, "server_max_window_bits="):
+			// We can't adjust the deflate window, but decoding with a larger window is acceptable.
+			if seenServerMaxWindowBits {
+				return nil, errors.New("websocket: duplicate server_max_window_bits parameter from server")
+			}
+			seenServerMaxWindowBits = true
+			val := strings.TrimPrefix(p, "server_max_window_bits=")
+			if val != "8" && val != "9" && val != "10" && val != "11" && val != "12" && val != "13" && val != "14" && val != "15" {
+				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
+			}
+		default:
+			return nil, fmt.Errorf("websocket: unsupported permessage-deflate parameter from server: %q", p)
+		}
+	}
+	return copts, nil
 }

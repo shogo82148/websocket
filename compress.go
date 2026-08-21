@@ -162,6 +162,27 @@ func putFlateReader(fr io.Reader) {
 	flateReaderPool.Put(fr)
 }
 
+var flateWriterPool = [flate.BestCompression - flate.HuffmanOnly + 1]sync.Pool{}
+
+func getFlateWriter(w io.Writer, level int) (*flate.Writer, error) {
+	if level < flate.HuffmanOnly || level > flate.BestCompression {
+		return nil, fmt.Errorf("flate: invalid compression level: %d", level)
+	}
+	fw, ok := flateWriterPool[level-flate.HuffmanOnly].Get().(*flate.Writer)
+	if !ok {
+		return flate.NewWriter(w, level)
+	}
+	fw.Reset(w)
+	return fw, nil
+}
+
+func putFlateWriter(fw *flate.Writer, level int) {
+	if level < flate.HuffmanOnly || level > flate.BestCompression {
+		return
+	}
+	flateWriterPool[level-flate.HuffmanOnly].Put(fw)
+}
+
 type slidingWindow struct {
 	buf []byte
 }
