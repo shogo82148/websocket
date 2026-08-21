@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -310,11 +309,7 @@ func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compress
 			}
 			seenServerMaxWindowBits = true
 			val := strings.TrimPrefix(p, "server_max_window_bits=")
-			v, err := strconv.Atoi(val)
-			if err != nil {
-				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
-			}
-			if v < 8 || v > 15 {
+			if val != "8" && val != "9" && val != "10" && val != "11" && val != "12" && val != "13" && val != "14" && val != "15" {
 				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
 			}
 		default:
