@@ -86,7 +86,7 @@ func FuzzUTF8Reader(f *testing.F) {
 		valid := utf8.ValidString(input)
 		ctx := t.Context()
 		conn, _ := newTestConnWithInput(t, []byte{})
-		r := iotest.OneByteReader(strings.NewReader(input))
+		r := strings.NewReader(input)
 		reader := &utf8Reader{ctx: ctx, r: r, conn: conn}
 		_, err := io.Copy(io.Discard, reader)
 		if (err == nil) != valid {
