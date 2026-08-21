@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 )
@@ -193,6 +194,57 @@ var utf8States = [...][256]utf8State{
 	},
 }
 
+// validateUTF8 advances the UTF-8 validation automaton from state by
+// consuming p and returns the resulting state (or utf8StateFail).
+func validateUTF8(state utf8State, p []byte) utf8State {
+	if len(p) == 0 {
+		return state
+	}
+	if len(p) == 1 {
+		return utf8States[state][p[0]]
+	}
+
+	for len(p) > 8 {
+		// skip over ASCII bytes quickly
+		if state == 0 {
+			bits := binary.LittleEndian.Uint64(p[:8])
+			if bits&0x8080808080808080 == 0 {
+				p = p[8:]
+				continue
+			}
+			if bits&0x80808080 == 0 {
+				p = p[4:]
+				continue
+			}
+			if bits&0x8080 == 0 {
+				p = p[2:]
+				continue
+			}
+			if p[0] < 0x80 {
+				p = p[1:]
+				continue
+			}
+		}
+
+		// consume the first byte and advance the state
+		state = utf8States[state][p[0]]
+		p = p[1:]
+	}
+
+	for len(p) > 0 {
+		// skip over ASCII bytes quickly
+		if state == 0 && p[0] < 0x80 {
+			p = p[1:]
+			continue
+		}
+
+		// consume the first byte and advance the state
+		state = utf8States[state][p[0]]
+		p = p[1:]
+	}
+	return state
+}
+
 // utf8Reader is a wrapper around an io.Reader that ensures that the data read
 // from the underlying reader is valid UTF-8.
 // If invalid UTF-8 is encountered, it returns an error.
@@ -213,9 +265,7 @@ func (r *utf8Reader) reset(ctx context.Context, reader io.Reader) {
 // Read reads data from the underlying reader and checks if it is valid UTF-8.
 func (r *utf8Reader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
-	for _, b := range p[:n] {
-		r.state = utf8States[r.state][b]
-	}
+	r.state = validateUTF8(r.state, p[:n])
 	if r.state == utf8StateFail {
 		r.conn.abnormalClosure(r.ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
 		return n, CloseError{
@@ -252,9 +302,7 @@ func (w *utf8Writer) reset(ctx context.Context, writer io.WriteCloser) {
 
 // Write writes data to the underlying writer and checks if it is valid UTF-8.
 func (w *utf8Writer) Write(p []byte) (int, error) {
-	for _, b := range p {
-		w.state = utf8States[w.state][b]
-	}
+	w.state = validateUTF8(w.state, p)
 	if w.state == utf8StateFail {
 		w.conn.abnormalClosure(w.ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
 		return 0, CloseError{
