@@ -25,7 +25,6 @@ var utf8TestCases = []struct {
 	{"\xE3\x81", false},                 // incomplete 3-byte sequence
 	{"\xc0\xaf", false},                 // overlong encoding
 	{"\xed\xa0\x80", false},             // surrogate half
-	{"\xf0\x90\x80\x80", false},         // overlong encoding
 	{"\xf8\x88\x80\x80\x80", false},     // 5-byte sequence (invalid)
 	{"\xfc\x84\x80\x80\x80\x80", false}, // 6-byte sequence (invalid)
 }
