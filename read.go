@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 type messageReader struct {
@@ -99,6 +100,10 @@ func (r *messageReader) close() error {
 // Reader reads from the connection until there is a WebSocket data message to be read.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
+	return c.reader(ctx, c.skipValidateUTF8Read)
+}
+
+func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, io.Reader, error) {
 	if err := c.readerMu.lock(ctx); err != nil {
 		return 0, nil, err
 	}
@@ -126,7 +131,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	}
 	c.limitReader.reset(ctx, r)
 	r = c.limitReader
-	if h.opCode == opText && !c.skipValidateUTF8Read {
+	if h.opCode == opText && !skipValidateUTF8 {
 		c.utf8Reader.reset(ctx, r)
 		r = c.utf8Reader
 	}
@@ -143,13 +148,20 @@ func (c *Conn) flateReadContextTakeover() bool {
 // Read reads a single WebSocket message from the connection.
 // It will handle ping, pong and close frames as appropriate.
 func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
-	typ, r, err := c.Reader(ctx)
+	typ, r, err := c.reader(ctx, true)
 	if err != nil {
 		return 0, nil, err
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return 0, nil, err
+	}
+	if typ == MessageText && !c.skipValidateUTF8Read && !utf8.Valid(data) {
+		c.abnormalClosure(ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
+		return 0, nil, CloseError{
+			Code:   StatusInvalidFramePayloadData,
+			Reason: "invalid UTF-8",
+		}
 	}
 	return typ, data, nil
 }
