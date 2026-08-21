@@ -260,10 +260,8 @@ func verifySubprotocol(subprotocols []string, resp *http.Response) error {
 	}
 
 	proto := protocols[0]
-	for _, sp := range subprotocols {
-		if strings.EqualFold(sp, proto) {
-			return nil
-		}
+	if slices.Contains(subprotocols, proto) {
+		return nil
 	}
 
 	return fmt.Errorf("websocket: server selected unsupported subprotocol: %q", proto)
