@@ -262,6 +262,93 @@ func TestVerifyServerResponse(t *testing.T) {
 			t.Fatalf("error = %v; want unsupported subprotocol error", err)
 		}
 	})
+
+	t.Run("permessage-deflate negotiation", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; client_no_context_takeover; server_no_context_takeover; server_max_window_bits=15")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err != nil {
+			t.Fatalf("verifyServerResponse failed: %v", err)
+		}
+		if copts == nil {
+			t.Fatal("verifyServerResponse returned nil compression options")
+		}
+		if !copts.clientNoContextTakeover {
+			t.Fatal("clientNoContextTakeover not set in compression options")
+		}
+		if !copts.serverNoContextTakeover {
+			t.Fatal("serverNoContextTakeover not set in compression options")
+		}
+	})
+
+	t.Run("duplicate client_no_context_takeover parameter", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; client_no_context_takeover; client_no_context_takeover")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "duplicate client_no_context_takeover") {
+			t.Fatalf("error = %v; want duplicate client_no_context_takeover error", err)
+		}
+	})
+
+	t.Run("duplicate server_no_context_takeover parameter", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_no_context_takeover; server_no_context_takeover")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "duplicate server_no_context_takeover") {
+			t.Fatalf("error = %v; want duplicate server_no_context_takeover error", err)
+		}
+	})
+
+	t.Run("duplicated server_max_window_bits parameter", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=15; server_max_window_bits=10")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "duplicate server_max_window_bits") {
+			t.Fatalf("error = %v; want duplicate server_max_window_bits error", err)
+		}
+	})
+
+	t.Run("invalid server_max_window_bits parameter", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=7")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "invalid server_max_window_bits") {
+			t.Fatalf("error = %v; want invalid server_max_window_bits error", err)
+		}
+	})
+
+	t.Run("unsupported permessage-deflate parameter", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; unsupported_param")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "unsupported permessage-deflate parameter") {
+			t.Fatalf("error = %v; want unsupported permessage-deflate parameter error", err)
+		}
+	})
 }
 
 func TestHandshakeRequest(t *testing.T) {

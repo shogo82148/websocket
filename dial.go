@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -284,14 +286,37 @@ func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compress
 	tmp := *copts
 	copts = &tmp
 
+	seenClientNoContextTakeover := false
+	seenServerNoContextTakeover := false
+	seenServerMaxWindowBits := false
 	for _, p := range ext.params {
 		switch {
 		case p == "client_no_context_takeover":
+			if seenClientNoContextTakeover {
+				return nil, errors.New("websocket: duplicate client_no_context_takeover parameter from server")
+			}
+			seenClientNoContextTakeover = true
 			copts.clientNoContextTakeover = true
 		case p == "server_no_context_takeover":
+			if seenServerNoContextTakeover {
+				return nil, errors.New("websocket: duplicate server_no_context_takeover parameter from server")
+			}
+			seenServerNoContextTakeover = true
 			copts.serverNoContextTakeover = true
 		case strings.HasPrefix(p, "server_max_window_bits="):
 			// We can't adjust the deflate window, but decoding with a larger window is acceptable.
+			if seenServerMaxWindowBits {
+				return nil, errors.New("websocket: duplicate server_max_window_bits parameter from server")
+			}
+			seenServerMaxWindowBits = true
+			val := strings.TrimPrefix(p, "server_max_window_bits=")
+			v, err := strconv.Atoi(val)
+			if err != nil {
+				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
+			}
+			if v < 8 || v > 15 {
+				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
+			}
 		default:
 			return nil, fmt.Errorf("websocket: unsupported permessage-deflate parameter from server: %q", p)
 		}
