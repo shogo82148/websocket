@@ -126,7 +126,7 @@ func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	}
 	c.limitReader.reset(ctx, r)
 	r = c.limitReader
-	if h.opCode == opText && !c.skipValidateUTF8 {
+	if h.opCode == opText && !c.skipValidateUTF8Read {
 		c.utf8Reader.reset(ctx, r)
 		r = c.utf8Reader
 	}

@@ -41,8 +41,11 @@ type Conn struct {
 	// subprotocol is the subprotocol negotiated during the handshake.
 	subprotocol string
 
-	// skipValidateUTF8 is true if the connection should skip UTF-8 validation for text messages.
-	skipValidateUTF8 bool
+	// skipValidateUTF8Read is true if the connection should skip UTF-8 validation for text messages when reading.
+	skipValidateUTF8Read bool
+
+	// skipValidateUTF8Write is true if the connection should skip UTF-8 validation for text messages when writing.
+	skipValidateUTF8Write bool
 
 	// for handling compression
 	copts          *compressionOptions
@@ -99,14 +102,15 @@ type conn struct {
 }
 
 type connConfig struct {
-	rwc              io.ReadWriteCloser
-	client           bool
-	subprotocol      string
-	skipValidateUTF8 bool
-	copts            *compressionOptions
-	flateThreshold   int
-	onPingReceived   func(context.Context, []byte) bool
-	onPongReceived   func(context.Context, []byte)
+	rwc                   io.ReadWriteCloser
+	client                bool
+	subprotocol           string
+	skipValidateUTF8Read  bool
+	skipValidateUTF8Write bool
+	copts                 *compressionOptions
+	flateThreshold        int
+	onPingReceived        func(context.Context, []byte) bool
+	onPongReceived        func(context.Context, []byte)
 
 	br *bufio.Reader
 	bw *bufio.Writer
@@ -124,13 +128,14 @@ func newConn(cfg connConfig) *Conn {
 
 			closed: closed,
 		},
-		subprotocol:      cfg.subprotocol,
-		skipValidateUTF8: cfg.skipValidateUTF8,
-		copts:            cfg.copts,
-		flateThreshold:   cfg.flateThreshold,
-		onPingReceived:   cfg.onPingReceived,
-		onPongReceived:   cfg.onPongReceived,
-		pings:            make(map[string]chan struct{}),
+		subprotocol:           cfg.subprotocol,
+		skipValidateUTF8Read:  cfg.skipValidateUTF8Read,
+		skipValidateUTF8Write: cfg.skipValidateUTF8Write,
+		copts:                 cfg.copts,
+		flateThreshold:        cfg.flateThreshold,
+		onPingReceived:        cfg.onPingReceived,
+		onPongReceived:        cfg.onPongReceived,
+		pings:                 make(map[string]chan struct{}),
 
 		readerMu:     newMutex(closed),
 		writerMu:     newMutex(closed),
