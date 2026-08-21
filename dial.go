@@ -133,8 +133,13 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	secWebSocketKey := base64.StdEncoding.EncodeToString(buf[:])
 
 	var copts *compressionOptions
-	if opts.CompressionMode != CompressionDisabled {
+	switch opts.CompressionMode {
+	case CompressionDisabled:
+		// no compression
+	case CompressionNoContextTakeover, CompressionContextTakeover:
 		copts = opts.CompressionMode.opts()
+	default:
+		return nil, nil, fmt.Errorf("websocket: unsupported compression mode: %v", opts.CompressionMode)
 	}
 
 	resp, err := handshakeRequest(ctx, u, secWebSocketKey, opts, copts)
