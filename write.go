@@ -156,7 +156,7 @@ func (c *Conn) Writer(ctx context.Context, messageType MessageType) (io.WriteClo
 
 	c.msgWriter.reset(ctx, opCode)
 	w := io.WriteCloser(c.msgWriter)
-	if opCode == opText && !c.skipValidateUTF8 {
+	if opCode == opText && !c.skipValidateUTF8Write {
 		c.utf8Writer.reset(ctx, w)
 		w = c.utf8Writer
 	}
@@ -175,7 +175,7 @@ func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) 
 		return fmt.Errorf("websocket: invalid message type: %s", messageType)
 	}
 
-	if opCode == opText && !c.skipValidateUTF8 {
+	if opCode == opText && !c.skipValidateUTF8Write {
 		if !utf8.Valid(data) {
 			c.abnormalClosure(ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
 			return CloseError{

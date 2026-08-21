@@ -51,12 +51,19 @@ type DialOptions struct {
 	// OnPongReceived is an optional callback invoked synchronously when a pong frame is received.
 	OnPongReceived func(ctx context.Context, payload []byte)
 
-	// SkipValidateUTF8 disables UTF-8 validation for text messages.
+	// SkipValidateUTF8Read disables UTF-8 validation for text messages when reading.
 	// This is useful for performance reasons if you know
 	// that the text messages are valid UTF-8.
 	//
 	// Defaults to false.
-	SkipValidateUTF8 bool
+	SkipValidateUTF8Read bool
+
+	// SkipValidateUTF8Write disables UTF-8 validation for text messages when writing.
+	// This is useful for performance reasons if you know
+	// that the text messages are valid UTF-8.
+	//
+	// Defaults to false.
+	SkipValidateUTF8Write bool
 }
 
 func (opts *DialOptions) cloneWithDefaults(ctx context.Context) (context.Context, context.CancelFunc, *DialOptions) {
@@ -146,17 +153,18 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 	}
 
 	return newConn(connConfig{
-		rwc:              rwc,
-		client:           true,
-		subprotocol:      subprotocol,
-		skipValidateUTF8: opts.SkipValidateUTF8,
-		copts:            copts,
-		flateThreshold:   opts.CompressionThreshold,
-		flateLevel:       opts.CompressionLevel,
-		onPingReceived:   opts.OnPingReceived,
-		onPongReceived:   opts.OnPongReceived,
-		br:               bufio.NewReader(rwc),
-		bw:               bufio.NewWriter(rwc),
+		rwc:                   rwc,
+		client:                true,
+		subprotocol:           subprotocol,
+		skipValidateUTF8Read:  opts.SkipValidateUTF8Read,
+		skipValidateUTF8Write: opts.SkipValidateUTF8Write,
+		copts:                 copts,
+		flateThreshold:        opts.CompressionThreshold,
+		flateLevel:            opts.CompressionLevel,
+		onPingReceived:        opts.OnPingReceived,
+		onPongReceived:        opts.OnPongReceived,
+		br:                    bufio.NewReader(rwc),
+		bw:                    bufio.NewWriter(rwc),
 	}), resp, nil
 }
 
