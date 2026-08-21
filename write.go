@@ -62,7 +62,7 @@ func (w *messageWriter) ensureFlate() error {
 		}
 	}
 	if w.flateWriter == nil {
-		flateWriter, err := flate.NewWriter(w.trimWriter, flate.DefaultCompression)
+		flateWriter, err := getFlateWriter(w.trimWriter, w.conn.flateLevel)
 		if err != nil {
 			return err
 		}
@@ -119,6 +119,7 @@ func (w *messageWriter) Close() error {
 	}
 	err := w.conn.writeFrame(w.ctx, true, w.flate, w.opCode, nil)
 	if w.flate && !w.flateContextTakeover() {
+		putFlateWriter(w.flateWriter, w.conn.flateLevel)
 		w.flateWriter = nil
 	}
 	w.conn.writerMu.unlock()
@@ -203,10 +204,12 @@ func (c *Conn) writeCompressedFrame(ctx context.Context, opCode opCode, data []b
 	buf := getWriteBuf()
 	defer putWriteBuf(buf)
 
-	flateWriter, err := flate.NewWriter(buf, flate.DefaultCompression)
+	flateWriter, err := getFlateWriter(buf, c.flateLevel)
 	if err != nil {
 		return err
 	}
+	defer putFlateWriter(flateWriter, c.flateLevel)
+
 	if _, err := flateWriter.Write(data); err != nil {
 		return err
 	}
