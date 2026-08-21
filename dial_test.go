@@ -324,11 +324,50 @@ func TestVerifyServerResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid server_max_window_bits parameter", func(t *testing.T) {
+	t.Run("server_max_window_bits parameter too small", func(t *testing.T) {
 		t.Parallel()
 
 		resp := validResponse()
 		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=7")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "invalid server_max_window_bits") {
+			t.Fatalf("error = %v; want invalid server_max_window_bits error", err)
+		}
+	})
+
+	t.Run("server_max_window_bits parameter too large", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=16")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "invalid server_max_window_bits") {
+			t.Fatalf("error = %v; want invalid server_max_window_bits error", err)
+		}
+	})
+
+	t.Run("server_max_window_bits parameter not number", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=invalid")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "invalid server_max_window_bits") {
+			t.Fatalf("error = %v; want invalid server_max_window_bits error", err)
+		}
+	})
+
+	t.Run("server_max_window_bits parameter with leading zero", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=08")
 		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
 		copts := opts.CompressionMode.opts()
 		_, err := verifyServerResponse(resp, key, opts, copts)
