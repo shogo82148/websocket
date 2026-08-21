@@ -244,9 +244,15 @@ func verifyServerResponse(resp *http.Response, secWebSocketKey string, opts *Dia
 	if got := resp.Header.Get("Sec-Websocket-Accept"); got != expectedAccept {
 		return nil, fmt.Errorf("websocket: Sec-Websocket-Accept mismatch: got %q, want %q", got, expectedAccept)
 	}
-	if err := verifySubprotocol(opts.Subprotocols, resp); err != nil {
+
+	var subprotocols []string
+	if opts != nil {
+		subprotocols = opts.Subprotocols
+	}
+	if err := verifySubprotocol(subprotocols, resp); err != nil {
 		return nil, err
 	}
+
 	return verifyServerExtensions(copts, resp.Header)
 }
 
