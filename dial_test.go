@@ -388,6 +388,19 @@ func TestVerifyServerResponse(t *testing.T) {
 			t.Fatalf("error = %v; want unsupported permessage-deflate parameter error", err)
 		}
 	})
+
+	t.Run("drops server_no_context_takeover", func(t *testing.T) {
+		t.Parallel()
+
+		resp := validResponse()
+		resp.Header.Set("Sec-Websocket-Extensions", "permessage-deflate")
+		opts := &DialOptions{CompressionMode: CompressionNoContextTakeover}
+		copts := opts.CompressionMode.opts()
+		_, err := verifyServerResponse(resp, key, opts, copts)
+		if err == nil || !strings.Contains(err.Error(), "server did not accept server_no_context_takeover") {
+			t.Fatalf("error = %v; want server did not accept server_no_context_takeover error", err)
+		}
+	})
 }
 
 func TestHandshakeRequest(t *testing.T) {
