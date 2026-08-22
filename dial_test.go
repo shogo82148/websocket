@@ -384,9 +384,9 @@ func TestVerifyServerResponse(t *testing.T) {
 		conn, rwc := newTestConnWithInput(t, nil)
 		_, err := verifyServerResponse(conn, resp, key, opts, copts)
 		if err == nil || !strings.Contains(err.Error(), "invalid server_max_window_bits") {
-			verifyCloseHandshake(t, rwc)
 			t.Fatalf("error = %v; want invalid server_max_window_bits error", err)
 		}
+		verifyCloseHandshake(t, rwc)
 	})
 
 	t.Run("server_max_window_bits parameter not number", func(t *testing.T) {
