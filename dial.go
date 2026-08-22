@@ -158,20 +158,20 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, *http.Respon
 		return nil, readResponseBody(resp), fmt.Errorf("websocket: response body is not a ReadWriteCloser: %T", resp.Body)
 	}
 
-	return newConn(connConfig{
+	conn := newConn(connConfig{
 		rwc:                   rwc,
 		client:                true,
 		subprotocol:           subprotocol,
 		skipValidateUTF8Read:  opts.SkipValidateUTF8Read,
 		skipValidateUTF8Write: opts.SkipValidateUTF8Write,
-		copts:                 copts,
-		flateThreshold:        opts.CompressionThreshold,
-		flateLevel:            opts.CompressionLevel,
 		onPingReceived:        opts.OnPingReceived,
 		onPongReceived:        opts.OnPongReceived,
 		br:                    bufio.NewReader(rwc),
 		bw:                    bufio.NewWriter(rwc),
-	}), resp, nil
+	})
+	conn.initCompression(copts, opts.CompressionThreshold, opts.CompressionLevel)
+
+	return conn, resp, nil
 }
 
 // readResponseBody reads a bit of the body for easier debugging.

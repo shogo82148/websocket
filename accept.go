@@ -185,21 +185,20 @@ func Accept(w http.ResponseWriter, r *http.Request, opts *AcceptOptions) (*Conn,
 	b, _ := brw.Reader.Peek(brw.Reader.Buffered())
 	brw.Reader.Reset(io.MultiReader(bytes.NewReader(b), conn))
 
-	return newConn(connConfig{
+	c := newConn(connConfig{
 		rwc:                   conn,
 		client:                false,
 		subprotocol:           subprotocol,
 		skipValidateUTF8Read:  opts.SkipValidateUTF8Read,
 		skipValidateUTF8Write: opts.SkipValidateUTF8Write,
-		copts:                 copts,
-		flateThreshold:        opts.CompressionThreshold,
-		flateLevel:            opts.CompressionLevel,
 		onPingReceived:        opts.OnPingReceived,
 		onPongReceived:        opts.OnPongReceived,
 
 		br: brw.Reader,
 		bw: brw.Writer,
-	}), nil
+	})
+	c.initCompression(copts, opts.CompressionThreshold, opts.CompressionLevel)
+	return c, nil
 }
 
 func selectSubprotocol(h http.Header, supported []string) string {

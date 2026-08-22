@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"context"
 	"errors"
 	"io"
@@ -323,13 +324,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -361,13 +362,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -399,13 +400,10 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: false,
-				serverNoContextTakeover: false,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(new(compressionOptions), 0, flate.BestSpeed)
 
 		// validate first frame
 		typ, payload, err := conn.Read(ctx)
@@ -450,13 +448,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -487,13 +485,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -524,13 +522,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -561,13 +559,13 @@ func TestConnRead(t *testing.T) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 0, flate.BestSpeed)
 
 		typ, payload, err := conn.Read(ctx)
 		if err != nil {
@@ -592,13 +590,12 @@ func TestConnRead(t *testing.T) {
 			copts := new(compressionOptions)
 			senderRWC := new(testReadWriteCloser)
 			sender := newConn(connConfig{
-				rwc:            senderRWC,
-				client:         senderClient,
-				copts:          copts,
-				flateThreshold: 1,
-				br:             bufio.NewReader(senderRWC),
-				bw:             bufio.NewWriter(senderRWC),
+				rwc:    senderRWC,
+				client: senderClient,
+				br:     bufio.NewReader(senderRWC),
+				bw:     bufio.NewWriter(senderRWC),
 			})
+			sender.initCompression(copts, 1, flate.BestSpeed)
 
 			first := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog;"), 128)
 			second := slices.Clone(first)
@@ -623,10 +620,10 @@ func TestConnRead(t *testing.T) {
 			receiver := newConn(connConfig{
 				rwc:    receiverRWC,
 				client: !senderClient,
-				copts:  copts,
 				br:     bufio.NewReader(receiverRWC),
 				bw:     bufio.NewWriter(receiverRWC),
 			})
+			receiver.initCompression(copts, 1, flate.BestSpeed)
 			receiver.SetReadLimit(-1)
 
 			for i, want := range [][]byte{first, second} {
@@ -714,12 +711,13 @@ func TestLimitReader(t *testing.T) {
 }
 
 func BenchmarkConnReader(b *testing.B) {
-	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig) []byte {
+	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig, copts *compressionOptions) []byte {
 		rwc := new(testReadWriteCloser)
 		config.rwc = rwc
 		config.br = bufio.NewReader(rwc)
 		config.bw = bufio.NewWriter(rwc)
 		conn := newConn(config)
+		conn.initCompression(copts, 1, flate.BestSpeed)
 		if err := conn.Write(ctx, typ, payload); err != nil {
 			b.Fatalf("failed to prepare test input: %v", err)
 		}
@@ -729,7 +727,7 @@ func BenchmarkConnReader(b *testing.B) {
 	b.Run("read a text frame on the server", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageText, payload, connConfig{client: true})
+		frame := newFrame(ctx, MessageText, payload, connConfig{client: true}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		conn.client = false // disable masking for outgoing frames
 		buf := make([]byte, 1024)
@@ -757,7 +755,7 @@ func BenchmarkConnReader(b *testing.B) {
 	b.Run("read a text frame on the client", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageText, payload, connConfig{})
+		frame := newFrame(ctx, MessageText, payload, connConfig{}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		buf := make([]byte, 1024)
 		b.ResetTimer()
@@ -784,7 +782,7 @@ func BenchmarkConnReader(b *testing.B) {
 	b.Run("read a binary frame on the server", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true})
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		conn.client = false // disable masking for outgoing frames
 		buf := make([]byte, 1024)
@@ -812,13 +810,11 @@ func BenchmarkConnReader(b *testing.B) {
 	b.Run("read a compressed binary frame on the client", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageBinary, payload, connConfig{
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 1,
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{}, &compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
 		})
+
 		rwc := new(testReadWriteCloser)
 		if _, err := rwc.r.Write(frame); err != nil {
 			b.Fatalf("failed to prepare test input: %v", err)
@@ -827,13 +823,13 @@ func BenchmarkConnReader(b *testing.B) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
 		buf := make([]byte, 1024)
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
@@ -859,12 +855,13 @@ func BenchmarkConnReader(b *testing.B) {
 }
 
 func BenchmarkConnRead(b *testing.B) {
-	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig) []byte {
+	newFrame := func(ctx context.Context, typ MessageType, payload []byte, config connConfig, copts *compressionOptions) []byte {
 		rwc := new(testReadWriteCloser)
 		config.rwc = rwc
 		config.br = bufio.NewReader(rwc)
 		config.bw = bufio.NewWriter(rwc)
 		conn := newConn(config)
+		conn.initCompression(copts, 1, flate.BestSpeed)
 		if err := conn.Write(ctx, typ, payload); err != nil {
 			b.Fatalf("failed to prepare test input: %v", err)
 		}
@@ -874,7 +871,7 @@ func BenchmarkConnRead(b *testing.B) {
 	b.Run("read a text frame on the server", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageText, payload, connConfig{client: true})
+		frame := newFrame(ctx, MessageText, payload, connConfig{client: true}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		conn.client = false // disable masking for outgoing frames
 		b.ResetTimer()
@@ -892,7 +889,7 @@ func BenchmarkConnRead(b *testing.B) {
 	b.Run("read a text frame on the client", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageText, payload, connConfig{})
+		frame := newFrame(ctx, MessageText, payload, connConfig{}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
@@ -909,7 +906,7 @@ func BenchmarkConnRead(b *testing.B) {
 	b.Run("read a binary frame on the server", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true})
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{client: true}, nil)
 		conn, rwc := newTestConnWithInput(b, frame)
 		conn.client = false // disable masking for outgoing frames
 		b.ResetTimer()
@@ -927,12 +924,9 @@ func BenchmarkConnRead(b *testing.B) {
 	b.Run("read a compressed binary frame on the client", func(b *testing.B) {
 		ctx := b.Context()
 		payload := []byte("Hello, 世界🍺")
-		frame := newFrame(ctx, MessageBinary, payload, connConfig{
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 1,
+		frame := newFrame(ctx, MessageBinary, payload, connConfig{}, &compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
 		})
 		rwc := new(testReadWriteCloser)
 		if _, err := rwc.r.Write(frame); err != nil {
@@ -942,13 +936,13 @@ func BenchmarkConnRead(b *testing.B) {
 		conn := newConn(connConfig{
 			rwc:    rwc,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc),
-			bw: bufio.NewWriter(rwc),
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
 
@@ -983,13 +977,13 @@ func FuzzConnReader(f *testing.F) {
 			br:     bufio.NewReader(rwc),
 			bw:     bufio.NewWriter(rwc),
 		}
+		conn := newConn(config)
 		if compressed {
-			config.copts = &compressionOptions{
+			conn.initCompression(&compressionOptions{
 				clientNoContextTakeover: contextTakeover,
 				serverNoContextTakeover: contextTakeover,
-			}
+			}, 0, flate.BestSpeed)
 		}
-		conn := newConn(config)
 		_, r, err := conn.Reader(t.Context())
 		if err != nil {
 			return
