@@ -392,7 +392,33 @@ func TestAccept(t *testing.T) {
 		h.Set("Connection", "Upgrade")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
-		h.Set("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits")
+
+		// unknown extension.
+		h.Add("Sec-Websocket-Extensions", "permessage-foo")
+
+		// client_max_window_bits is too small.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits=7")
+
+		// unsupported server_max_window_bits value.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=8")
+
+		// duplicate client_no_context_takeover parameter.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; client_no_context_takeover; client_no_context_takeover")
+
+		// duplicate server_no_context_takeover parameter.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; server_no_context_takeover; server_no_context_takeover")
+
+		// duplicate client_max_window_bits parameter.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits=15; client_max_window_bits=15")
+
+		// duplicate server_max_window_bits parameter.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; server_max_window_bits=15; server_max_window_bits=15")
+
+		// unknown parameter.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; foo_bar")
+
+		// valid extension, it will be accepted.
+		h.Add("Sec-Websocket-Extensions", "permessage-deflate; client_max_window_bits=15")
 
 		resp, err := ts.Client().Do(req)
 		if err != nil {
@@ -446,6 +472,36 @@ func BenchmarkAcceptHeader(b *testing.B) {
 	}
 }
 
+func TestParseInt(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		param   string
+		want    int
+		wantErr bool
+	}{
+		{"max_window_bits=15", 15, false},
+		{"max_window_bits=8", 8, false},
+		{`max_window_bits="15"`, 15, false},
+		{"max_window_bits=-1", 0, true},
+		{"max_window_bits=abc", 0, true},
+		{"max_window_bits=08", 0, true},
+		{"max_window_bits=", 0, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.param, func(t *testing.T) {
+			got, err := parseInt(tc.param)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("parseInt(%q) error = %v, wantErr = %v", tc.param, err, tc.wantErr)
+				return
+			}
+			if got != tc.want {
+				t.Errorf("parseInt(%q) = %d, want %d", tc.param, got, tc.want)
+			}
+		})
+	}
+}
 func TestValidateOrigin(t *testing.T) {
 	t.Parallel()
 

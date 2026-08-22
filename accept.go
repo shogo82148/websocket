@@ -283,24 +283,92 @@ func selectDeflate(selectDeflate iter.Seq[websocketExtension], mode CompressionM
 	return nil, false
 }
 
+func parseInt(param string) (int, error) {
+	_, value, ok := strings.Cut(param, "=")
+	if !ok {
+		return 0, fmt.Errorf("websocket: parameter value is missing: %q", param)
+	}
+
+	// Remove quotes if present
+	if len(value) > 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+	}
+
+	// Validate that the value is a valid integer string
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return 0, fmt.Errorf("websocket: invalid parameter value: %q", param)
+		}
+	}
+
+	// leading zeros are not allowed
+	if len(value) > 1 && value[0] == '0' {
+		return 0, fmt.Errorf("websocket: invalid parameter value: %q", param)
+	}
+
+	i, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("websocket: invalid parameter value: %q", param)
+	}
+	return i, nil
+}
+
 func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOptions, bool) {
+	seenClientNoContextTakeover := false
+	seenServerNoContextTakeover := false
+	seenClientMaxWindowBits := false
+	seenServerMaxWindowBits := false
 	copts := mode.opts()
 	for _, p := range ext.params {
-		switch p {
-		case "client_no_context_takeover":
+		switch {
+		case p == "client_no_context_takeover":
+			if seenClientNoContextTakeover {
+				return nil, false
+			}
+			seenClientNoContextTakeover = true
 			copts.clientNoContextTakeover = true
-			continue
-		case "server_no_context_takeover":
+
+		case p == "server_no_context_takeover":
+			if seenServerNoContextTakeover {
+				return nil, false
+			}
+			seenServerNoContextTakeover = true
 			copts.serverNoContextTakeover = true
-			continue
-		case "client_max_window_bits", "server_max_window_bits":
-			continue
-		}
-		if strings.HasPrefix(p, "client_max_window_bits=") {
+
+		case p == "client_max_window_bits":
+			if seenClientMaxWindowBits {
+				return nil, false
+			}
+			seenClientMaxWindowBits = true
+
+		case strings.HasPrefix(p, "client_max_window_bits="):
+			if seenClientMaxWindowBits {
+				return nil, false
+			}
+			seenClientMaxWindowBits = true
+
 			// We can't adjust the deflate window, but decoding with a larger window is acceptable.
-			continue
+			val, err := parseInt(p)
+			if err != nil || val < 8 || val > 15 {
+				return nil, false
+			}
+
+		case strings.HasPrefix(p, "server_max_window_bits="):
+			if seenServerMaxWindowBits {
+				return nil, false
+			}
+			seenServerMaxWindowBits = true
+
+			// We can't adjust the deflate window, the largest window is only acceptable.
+			val, err := parseInt(p)
+			if err != nil || val != 15 {
+				return nil, false
+			}
+
+		default:
+			// unknown parameter, reject the extension.
+			return nil, false
 		}
-		return nil, false
 	}
 	return copts, true
 }
