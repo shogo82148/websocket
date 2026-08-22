@@ -12,7 +12,7 @@ func TestAccept(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := Accept(w, r, nil)
 			if err != nil {
 				t.Errorf("Accept failed: %v", err)
@@ -20,10 +20,9 @@ func TestAccept(t *testing.T) {
 			}
 			conn.CloseNow()
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -57,7 +56,7 @@ func TestAccept(t *testing.T) {
 		t.Parallel()
 
 		selected := make(chan string, 1)
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := Accept(w, r, &AcceptOptions{Subprotocols: []string{"superchat", "chat"}})
 			if err != nil {
 				t.Errorf("Accept failed: %v", err)
@@ -66,9 +65,8 @@ func TestAccept(t *testing.T) {
 			selected <- conn.Subprotocol()
 			conn.CloseNow()
 		}))
-		defer ts.Close()
 
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -94,16 +92,15 @@ func TestAccept(t *testing.T) {
 	t.Run("invalid method", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for invalid method")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -128,16 +125,15 @@ func TestAccept(t *testing.T) {
 	t.Run("missing upgrade header", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for missing upgrade header")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -168,16 +164,15 @@ func TestAccept(t *testing.T) {
 	t.Run("missing connection header", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for missing connection header")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -208,16 +203,15 @@ func TestAccept(t *testing.T) {
 	t.Run("invalid websocket version", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for invalid websocket version")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -245,16 +239,15 @@ func TestAccept(t *testing.T) {
 	t.Run("missing websocket key", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for missing websocket key")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -279,16 +272,15 @@ func TestAccept(t *testing.T) {
 	t.Run("multiple websocket keys", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for multiple websocket keys")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -314,16 +306,15 @@ func TestAccept(t *testing.T) {
 	t.Run("invalid base64 websocket keys", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for invalid base64 websocket keys")
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -348,16 +339,14 @@ func TestAccept(t *testing.T) {
 	t.Run("short websocket keys", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Errorf("Accept should have failed for short websocket keys")
 			}
 		}))
-		defer ts.Close()
-
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -382,7 +371,7 @@ func TestAccept(t *testing.T) {
 	t.Run("negotiate extensions", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := Accept(w, r, &AcceptOptions{
 				CompressionMode: CompressionContextTakeover,
 			})
@@ -392,10 +381,9 @@ func TestAccept(t *testing.T) {
 			}
 			conn.CloseNow()
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
@@ -420,24 +408,23 @@ func TestAccept(t *testing.T) {
 	t.Run("origin mismatch", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := Accept(w, r, nil)
 			if err == nil {
 				t.Error("Accept should have failed for origin mismatch")
 				return
 			}
 		}))
-		defer ts.Close()
 
 		ctx := t.Context()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequestWithContext failed: %v", err)
 		}
 		h := req.Header
 		h.Set("Upgrade", "websocket")
 		h.Set("Connection", "Upgrade")
-		h.Set("Origin", "http://example.com")
+		h.Set("Origin", "http://foo.example.com")
 		h.Set("Sec-Websocket-Version", "13")
 		h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
 
