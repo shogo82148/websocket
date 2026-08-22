@@ -308,22 +308,25 @@ func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compress
 			}
 			seenClientNoContextTakeover = true
 			copts.clientNoContextTakeover = true
+
 		case p == "server_no_context_takeover":
 			if seenServerNoContextTakeover {
 				return nil, errors.New("websocket: duplicate server_no_context_takeover parameter from server")
 			}
 			seenServerNoContextTakeover = true
 			copts.serverNoContextTakeover = true
+
 		case strings.HasPrefix(p, "server_max_window_bits="):
 			// We can't adjust the deflate window, but decoding with a larger window is acceptable.
 			if seenServerMaxWindowBits {
 				return nil, errors.New("websocket: duplicate server_max_window_bits parameter from server")
 			}
 			seenServerMaxWindowBits = true
-			val := strings.TrimPrefix(p, "server_max_window_bits=")
-			if val != "8" && val != "9" && val != "10" && val != "11" && val != "12" && val != "13" && val != "14" && val != "15" {
+			val, err := parseInt(p)
+			if err != nil || val < 8 || val > 15 {
 				return nil, fmt.Errorf("websocket: invalid server_max_window_bits parameter from server: %q", p)
 			}
+
 		default:
 			return nil, fmt.Errorf("websocket: unsupported permessage-deflate parameter from server: %q", p)
 		}
