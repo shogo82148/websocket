@@ -335,6 +335,12 @@ func acceptDeflate(ext websocketExtension, mode CompressionMode) (*compressionOp
 			seenServerNoContextTakeover = true
 			copts.serverNoContextTakeover = true
 
+		case p == "client_max_window_bits":
+			if seenClientMaxWindowBits {
+				return nil, false
+			}
+			seenClientMaxWindowBits = true
+
 		case strings.HasPrefix(p, "client_max_window_bits="):
 			if seenClientMaxWindowBits {
 				return nil, false
