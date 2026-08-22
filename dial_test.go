@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net/http"
@@ -198,6 +199,14 @@ func TestVerifyServerResponse(t *testing.T) {
 		}
 		if data[0] != 0x88 {
 			t.Fatalf("close handshake opcode = %x; want 0x88", data[0])
+		}
+		if data[1]&0x80 == 0 {
+			t.Fatal("close handshake not masked")
+		}
+		maskKey := binary.BigEndian.Uint32(data[2:6])
+		maskFramePayload(data[6:], maskKey)
+		if data[6] != 0x03 || data[7] != 0xea {
+			t.Fatalf("close handshake payload = %x; want 03ea", data[6:8])
 		}
 	}
 
