@@ -296,6 +296,7 @@ func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compress
 	tmp := *copts
 	copts = &tmp
 
+	requestedServerNoContextTakeover := copts.serverNoContextTakeover
 	seenClientNoContextTakeover := false
 	seenServerNoContextTakeover := false
 	seenServerMaxWindowBits := false
@@ -326,6 +327,9 @@ func verifyServerExtensions(copts *compressionOptions, h http.Header) (*compress
 		default:
 			return nil, fmt.Errorf("websocket: unsupported permessage-deflate parameter from server: %q", p)
 		}
+	}
+	if requestedServerNoContextTakeover && !seenServerNoContextTakeover {
+		return nil, errors.New("websocket: server did not accept server_no_context_takeover")
 	}
 	return copts, nil
 }
