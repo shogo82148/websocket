@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"context"
 	"errors"
 	"io"
@@ -171,12 +172,11 @@ func TestConnWriter(t *testing.T) {
 			rwc: rwc,
 			br:  bufio.NewReader(rwc),
 			bw:  bufio.NewWriter(rwc),
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 5,
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 5, flate.BestSpeed)
 
 		w, err := conn.Writer(ctx, MessageText)
 		if err != nil {
@@ -203,11 +203,11 @@ func TestConnWriter(t *testing.T) {
 			client: true,
 			br:     bufio.NewReader(peerRWC),
 			bw:     bufio.NewWriter(peerRWC),
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
 		})
+		peer.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 5, flate.BestSpeed)
 		_, got, err := peer.Read(ctx)
 		if err != nil {
 			t.Fatalf("Read failed: %v", err)
@@ -220,12 +220,11 @@ func TestConnWriter(t *testing.T) {
 	t.Run("does not start compression after the first fragment", func(t *testing.T) {
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
-			rwc:            rwc,
-			br:             bufio.NewReader(rwc),
-			bw:             bufio.NewWriter(rwc),
-			copts:          new(compressionOptions),
-			flateThreshold: 5,
+			rwc: rwc,
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(rwc),
 		})
+		conn.initCompression(new(compressionOptions), 5, flate.BestSpeed)
 
 		w, err := conn.Writer(t.Context(), MessageText)
 		if err != nil {
@@ -412,12 +411,11 @@ func TestConnWrite(t *testing.T) {
 			rwc: rwc,
 			br:  bufio.NewReader(rwc),
 			bw:  bufio.NewWriter(rwc),
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 1,
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
 
 		if err := conn.Write(ctx, MessageText, []byte("Hello")); err != nil {
 			t.Fatalf("Write failed: %v", err)
@@ -430,13 +428,13 @@ func TestConnWrite(t *testing.T) {
 		conn2 := newConn(connConfig{
 			rwc:    rwc2,
 			client: true,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			br: bufio.NewReader(rwc2),
-			bw: bufio.NewWriter(rwc2),
+			br:     bufio.NewReader(rwc2),
+			bw:     bufio.NewWriter(rwc2),
 		})
+		conn2.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
 
 		typ, got, err := conn2.Read(ctx)
 		if err != nil {
@@ -533,14 +531,14 @@ func BenchmarkConnWriter(b *testing.B) {
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
 			rwc: rwc,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 1,
-			br:             bufio.NewReader(rwc),
-			bw:             bufio.NewWriter(io.Discard),
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
+
 		payload := []byte("Hello, 世界🍺")
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))
@@ -620,14 +618,13 @@ func BenchmarkConnWrite(b *testing.B) {
 		rwc := new(testReadWriteCloser)
 		conn := newConn(connConfig{
 			rwc: rwc,
-			copts: &compressionOptions{
-				clientNoContextTakeover: true,
-				serverNoContextTakeover: true,
-			},
-			flateThreshold: 1,
-			br:             bufio.NewReader(rwc),
-			bw:             bufio.NewWriter(io.Discard),
+			br:  bufio.NewReader(rwc),
+			bw:  bufio.NewWriter(io.Discard),
 		})
+		conn.initCompression(&compressionOptions{
+			clientNoContextTakeover: true,
+			serverNoContextTakeover: true,
+		}, 1, flate.BestSpeed)
 		payload := []byte("Hello, 世界🍺")
 		b.ResetTimer()
 		b.SetBytes(int64(len(payload)))

@@ -108,9 +108,6 @@ type connConfig struct {
 	subprotocol           string
 	skipValidateUTF8Read  bool
 	skipValidateUTF8Write bool
-	copts                 *compressionOptions
-	flateThreshold        int
-	flateLevel            int
 	onPingReceived        func(context.Context, []byte) bool
 	onPongReceived        func(context.Context, []byte)
 
@@ -133,9 +130,6 @@ func newConn(cfg connConfig) *Conn {
 		subprotocol:           cfg.subprotocol,
 		skipValidateUTF8Read:  cfg.skipValidateUTF8Read,
 		skipValidateUTF8Write: cfg.skipValidateUTF8Write,
-		copts:                 cfg.copts,
-		flateThreshold:        cfg.flateThreshold,
-		flateLevel:            cfg.flateLevel,
 		onPingReceived:        cfg.onPingReceived,
 		onPongReceived:        cfg.onPongReceived,
 		pings:                 make(map[string]chan struct{}),
@@ -150,6 +144,20 @@ func newConn(cfg connConfig) *Conn {
 	c.utf8Reader = &utf8Reader{conn: c}
 	c.msgWriter = newMessageWriter(c)
 	c.utf8Writer = &utf8Writer{conn: c}
+
+	runtime.AddCleanup(c, func(c *conn) {
+		_ = c.close()
+	}, c.conn)
+	c.startReadWatcher()
+	c.startWriteWatcher()
+	return c
+}
+
+func (c *Conn) initCompression(copts *compressionOptions, flateThreshold, flateLevel int) {
+	c.copts = copts
+	c.flateThreshold = flateThreshold
+	c.flateLevel = flateLevel
+
 	if c.flate() {
 		c.flateReader = new(flateReader)
 	}
@@ -168,13 +176,6 @@ func newConn(cfg connConfig) *Conn {
 			c.flateThreshold = 512
 		}
 	}
-
-	runtime.AddCleanup(c, func(c *conn) {
-		_ = c.close()
-	}, c.conn)
-	c.startReadWatcher()
-	c.startWriteWatcher()
-	return c
 }
 
 // flate returns true if the connection is using permessage-deflate compression.
