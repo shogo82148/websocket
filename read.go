@@ -276,7 +276,7 @@ func (c *Conn) handleControlFrame(ctx context.Context, h frameHeader) error {
 		return errors.New("websocket: control frame is fragmented")
 	}
 
-	buf := make([]byte, h.payloadLen)
+	buf := c.readBuf[:h.payloadLen]
 	if _, err := io.ReadFull(c.br, buf); err != nil {
 		return err
 	}
