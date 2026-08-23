@@ -124,9 +124,9 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 	}
 
 	if h.opCode == opContinuation {
+		c.abnormalClosure(ctx, StatusProtocolError, "received continuation frame without a preceding data frame")
 		c.finishRead()
 		c.readerMu.unlock()
-		c.abnormalClosure(ctx, StatusProtocolError, "received continuation frame without a preceding data frame")
 		return 0, nil, errors.New("websocket: received continuation frame without a preceding data frame")
 	}
 
