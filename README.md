@@ -10,7 +10,7 @@ go get github.com/shogo82148/websocket@latest
 
 ## Examples
 
-The API is compatible with https://github.com/coder/websocket.
+The API is compatible with <https://github.com/coder/websocket>.
 
 ### Server
 
