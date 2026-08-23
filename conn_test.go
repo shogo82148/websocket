@@ -103,6 +103,10 @@ func TestHandshaking(t *testing.T) {
 	if string(data) != "Hello" {
 		t.Fatalf("Read returned data %q; want %q", data, "Hello")
 	}
+
+	if err := conn.Close(StatusNormalClosure, "normal closure"); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
 }
 
 func TestConnCleanupClosesUnderlyingConnection(t *testing.T) {
