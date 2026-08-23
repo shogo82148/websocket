@@ -33,6 +33,8 @@ func main() {
     defer conn.CloseNow()
 
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
     if err := conn.Write(ctx, websocket.MessageText, []byte("Hello WebSocket!")); err != nil {
       log.Println(err)
       return
