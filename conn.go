@@ -60,6 +60,7 @@ type Conn struct {
 	utf8Reader    *utf8Reader
 	closeReadOnce sync.Once
 	closeReadCtx  context.Context
+	readBuf       [maxControlPayload]byte
 
 	// for synchronizing writes
 	writerMu     *mutex
