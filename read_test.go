@@ -284,6 +284,19 @@ func TestConnReader(t *testing.T) {
 			t.Fatalf("Read error = %v; want non-nil", err)
 		}
 	})
+
+	t.Run("continuation frame without text or binary frame returns error", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+
+		frame := []byte{0x00, 0x00} // continuation frame without preceding text or binary frame
+		conn, _ := newTestConnWithInput(t, frame)
+
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			t.Fatalf("Read error = %v; want non-nil", err)
+		}
+	})
 }
 
 func TestConnRead(t *testing.T) {
