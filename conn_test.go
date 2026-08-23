@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -55,6 +57,51 @@ func TestCloseStatus(t *testing.T) {
 				t.Errorf("CloseStatus(%v) = %d; want %d", test.err, got, test.expected)
 			}
 		})
+	}
+}
+
+func TestHandshaking(t *testing.T) {
+	ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept failed: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+
+		ctx := r.Context()
+		typ, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Errorf("Read failed: %v", err)
+		}
+		if err := conn.Write(ctx, typ, data); err != nil {
+			t.Errorf("Write failed: %v", err)
+		}
+		conn.Close(StatusNormalClosure, "normal closure")
+	}))
+
+	ctx := t.Context()
+	conn, _, err := Dial(ctx, "ws://example.com", &DialOptions{
+		HTTPClient: ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if err := conn.Write(ctx, MessageText, []byte("Hello")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	typ, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if typ != MessageText {
+		t.Fatalf("Read returned type %v; want %v", typ, MessageText)
+	}
+	if string(data) != "Hello" {
+		t.Fatalf("Read returned data %q; want %q", data, "Hello")
 	}
 }
 
