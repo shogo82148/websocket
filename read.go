@@ -123,6 +123,13 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 		return 0, nil, err
 	}
 
+	if h.opCode == opContinuation {
+		c.finishRead()
+		c.readerMu.unlock()
+		c.abnormalClosure(ctx, StatusProtocolError, "received continuation frame without a preceding data frame")
+		return 0, nil, errors.New("websocket: received continuation frame without a preceding data frame")
+	}
+
 	c.msgReader.reset(ctx, h)
 	r := io.Reader(c.msgReader)
 	if flate := h.rsv1; flate {
