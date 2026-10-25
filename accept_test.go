@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -509,6 +510,7 @@ func TestValidateOrigin(t *testing.T) {
 		name     string
 		origin   string
 		host     string
+		tls      bool
 		patterns []string
 		success  bool
 	}{
@@ -545,6 +547,44 @@ func TestValidateOrigin(t *testing.T) {
 			name:    "host is case-insensitive",
 			origin:  "https://examplE.com",
 			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "non-default origin port on the same host",
+			origin:  "https://example.com:8080",
+			host:    "example.com",
+			success: false,
+		},
+		{
+			name:    "explicit default https port on the same host",
+			origin:  "https://example.com:443",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "explicit default http port on the same host",
+			origin:  "http://example.com:80",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "http origin without TLS",
+			origin:  "http://example.com",
+			host:    "example.com",
+			success: true,
+		},
+		{
+			name:    "http origin over TLS",
+			origin:  "http://example.com",
+			host:    "example.com",
+			tls:     true,
+			success: false,
+		},
+		{
+			name:    "https origin over TLS",
+			origin:  "https://example.com",
+			host:    "example.com",
+			tls:     true,
 			success: true,
 		},
 		{
@@ -630,6 +670,9 @@ func TestValidateOrigin(t *testing.T) {
 			r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://"+tc.host, nil)
 			if tc.origin != "" {
 				r.Header.Set("Origin", tc.origin)
+			}
+			if tc.tls {
+				r.TLS = &tls.ConnectionState{}
 			}
 
 			err := validateOrigin(r, tc.patterns)

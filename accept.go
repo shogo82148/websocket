@@ -444,7 +444,14 @@ func validateOrigin(req *http.Request, allowed []string) error {
 	}
 
 	if strings.EqualFold(o.host, req.Host) {
-		return nil
+		// o.host never carries a port, so this match means the request was sent to the default port.
+		// Only an origin on the default port of its scheme can be the same origin.
+		isDefaultPort := (o.scheme == "http" && o.port == 80) || (o.scheme == "https" && o.port == 443)
+		// If the server terminated TLS itself, the page origin must be https.
+		isPlainHTTPOverTLS := req.TLS != nil && o.scheme == "http"
+		if isDefaultPort && !isPlainHTTPOverTLS {
+			return nil
+		}
 	}
 
 	for _, a := range allowed {
