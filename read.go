@@ -130,6 +130,18 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 		return 0, nil, errors.New("websocket: received continuation frame without a preceding data frame")
 	}
 
+	// readerMu is released as soon as the frame payload is consumed,
+	// but the readers stacked on msgReader may still be in use by the previous message.
+	// Wait for them before resetting.
+	c.readChainMu.Lock()
+	defer c.readChainMu.Unlock()
+
+	// retire the previous message's reader.
+	c.readGen++
+	if c.flateReader != nil {
+		c.flateReader.close()
+	}
+
 	c.msgReader.reset(ctx, h)
 	r := io.Reader(c.msgReader)
 	if flate := h.rsv1; flate {
@@ -142,7 +154,24 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 		c.utf8Reader.reset(ctx, r)
 		r = c.utf8Reader
 	}
-	return MessageType(h.opCode), r, nil
+	return MessageType(h.opCode), &chainReader{c: c, gen: c.readGen, r: r}, nil
+}
+
+// chainReader serializes reads from the reader chain of a message.
+// It returns net.ErrClosed after the next message has started.
+type chainReader struct {
+	c   *Conn
+	gen uint64
+	r   io.Reader
+}
+
+func (r *chainReader) Read(p []byte) (int, error) {
+	r.c.readChainMu.Lock()
+	defer r.c.readChainMu.Unlock()
+	if r.gen != r.c.readGen {
+		return 0, net.ErrClosed
+	}
+	return r.r.Read(p)
 }
 
 func (c *Conn) flateReadContextTakeover() bool {
