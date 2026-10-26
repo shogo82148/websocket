@@ -655,6 +655,168 @@ func TestConnRead(t *testing.T) {
 	}
 }
 
+func TestConnReaderCompressedMessageBoundary(t *testing.T) {
+	first := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog;"), 1024)
+	second := []byte(`{"n":2}`)
+
+	newReceiver := func(t *testing.T, copts *compressionOptions) *Conn {
+		t.Helper()
+		ctx := t.Context()
+		senderRWC := new(testReadWriteCloser)
+		sender := newConn(connConfig{
+			rwc:    senderRWC,
+			client: true,
+			br:     bufio.NewReader(senderRWC),
+			bw:     bufio.NewWriter(senderRWC),
+		})
+		sender.initCompression(copts, 1, flate.BestSpeed)
+		for _, message := range [][]byte{first, second} {
+			if err := sender.Write(ctx, MessageBinary, message); err != nil {
+				t.Fatalf("Write failed: %v", err)
+			}
+		}
+
+		receiverRWC := new(testReadWriteCloser)
+		if _, err := receiverRWC.r.Write(senderRWC.w.Bytes()); err != nil {
+			t.Fatalf("failed to prepare test input: %v", err)
+		}
+		receiver := newConn(connConfig{
+			rwc:    receiverRWC,
+			client: false,
+			br:     bufio.NewReader(receiverRWC),
+			bw:     bufio.NewWriter(receiverRWC),
+		})
+		receiver.initCompression(copts, 1, flate.BestSpeed)
+		receiver.SetReadLimit(-1)
+		return receiver
+	}
+
+	modes := []struct {
+		name  string
+		copts *compressionOptions
+	}{
+		{"context takeover", new(compressionOptions)},
+		{"no context takeover", &compressionOptions{clientNoContextTakeover: true, serverNoContextTakeover: true}},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name+": reading exactly the message does not block the next Reader", func(t *testing.T) {
+			conn := newReceiver(t, mode.copts)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			_, r, err := conn.Reader(ctx)
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			buf := make([]byte, len(first))
+			if _, err := io.ReadFull(r, buf); err != nil {
+				t.Fatalf("ReadFull failed: %v", err)
+			}
+			if !bytes.Equal(buf, first) {
+				t.Fatal("first message does not match")
+			}
+
+			_, r, err = conn.Reader(ctx)
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("ReadAll failed: %v", err)
+			}
+			if !bytes.Equal(got, second) {
+				t.Fatalf("second message = %q; want %q", got, second)
+			}
+		})
+
+		t.Run(mode.name+": the previous reader is closed by the next Reader", func(t *testing.T) {
+			conn := newReceiver(t, mode.copts)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			_, r1, err := conn.Reader(ctx)
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			if _, err := io.ReadFull(r1, make([]byte, 1024)); err != nil {
+				t.Fatalf("ReadFull failed: %v", err)
+			}
+
+			// the compressed payload of the first message has been consumed,
+			// so the next message can be started.
+			_, r2, err := conn.Reader(ctx)
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			if _, err := r1.Read(make([]byte, 1024)); !errors.Is(err, net.ErrClosed) {
+				t.Errorf("Read of the previous reader error = %v; want %v", err, net.ErrClosed)
+			}
+
+			got, err := io.ReadAll(r2)
+			if mode.copts.clientNoContextTakeover {
+				if err != nil {
+					t.Fatalf("ReadAll failed: %v", err)
+				}
+				if !bytes.Equal(got, second) {
+					t.Fatalf("second message = %q; want %q", got, second)
+				}
+			}
+		})
+
+		t.Run(mode.name+": concurrent Reader does not race with the previous reader", func(t *testing.T) {
+			conn := newReceiver(t, mode.copts)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			_, r1, err := conn.Reader(ctx)
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			if _, err := io.ReadFull(r1, make([]byte, 1024)); err != nil {
+				t.Fatalf("ReadFull failed: %v", err)
+			}
+
+			done := make(chan []byte)
+			go func() {
+				defer close(done)
+				_, r2, err := conn.Reader(ctx)
+				if err != nil {
+					t.Errorf("Reader failed: %v", err)
+					return
+				}
+				got, err := io.ReadAll(r2)
+				if err != nil {
+					return
+				}
+				done <- got
+			}()
+
+			buf := make([]byte, 512)
+			read := 1024
+			for {
+				n, err := r1.Read(buf)
+				if !bytes.Equal(buf[:n], first[read:read+n]) {
+					t.Errorf("first message is corrupted at offset %d", read)
+					break
+				}
+				read += n
+				if err != nil {
+					if err != io.EOF && !errors.Is(err, net.ErrClosed) {
+						t.Errorf("Read failed: %v", err)
+					}
+					break
+				}
+			}
+
+			got, ok := <-done
+			if ok && mode.copts.clientNoContextTakeover && !bytes.Equal(got, second) {
+				t.Errorf("second message = %q; want %q", got, second)
+			}
+		})
+	}
+}
+
 func TestConnCloseRead(t *testing.T) {
 	t.Run("returns a context canceled when reading stops", func(t *testing.T) {
 		conn, _ := newTestConnWithInput(t, nil)

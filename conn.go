@@ -58,6 +58,8 @@ type Conn struct {
 	flateReader   *flateReader
 	limitReader   *limitReader
 	utf8Reader    *utf8Reader
+	readChainMu   sync.Mutex // guards the reader chain above and readGen
+	readGen       uint64     // incremented each time a new message starts
 	closeReadOnce sync.Once
 	closeReadCtx  context.Context
 	readBuf       [maxControlPayload]byte
