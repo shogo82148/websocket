@@ -145,7 +145,7 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 	c.msgReader.reset(ctx, h)
 	r := io.Reader(c.msgReader)
 	if flate := h.rsv1; flate {
-		c.flateReader.reset(r, c.flateReadContextTakeover())
+		c.flateReader.reset(c.msgReader, c.flateReadContextTakeover())
 		r = c.flateReader
 	}
 	c.limitReader.reset(ctx, r)
@@ -398,15 +398,17 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 }
 
 type flateReader struct {
+	src         *messageReader
 	flateReader io.Reader
 	flateTail   strings.Reader
 	dict        slidingWindow
 	takeover    bool
 }
 
-func (fr *flateReader) reset(r io.Reader, takeover bool) {
+func (fr *flateReader) reset(src *messageReader, takeover bool) {
+	fr.src = src
 	fr.flateTail.Reset(deflateMessageTail)
-	r = io.MultiReader(r, &fr.flateTail)
+	r := io.MultiReader(src, &fr.flateTail)
 	fr.takeover = takeover
 	if takeover {
 		fr.dict.init(32 * 1024)
@@ -426,8 +428,35 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 	}
 	if errors.Is(err, io.EOF) {
 		fr.close()
+		if err := fr.finishMessage(); err != nil {
+			return n, err
+		}
 	}
 	return n, err
+}
+
+// finishMessage is called when the deflate stream ends.
+// A DEFLATE block with BFINAL set may end the stream before the end of the message
+// (RFC 7692 Section 7.2.3.4), so the rest of the message is discarded.
+// Otherwise the rest is left unread and the read lock is never released.
+func (fr *flateReader) finishMessage() error {
+	src := fr.src
+	limit := src.conn.limitReader.limit.Load()
+	var buf [512]byte
+	var discarded int64
+	for !src.closed {
+		n, err := src.Read(buf[:])
+		discarded += int64(n)
+		if limit >= 0 && discarded > limit {
+			src.conn.abnormalClosure(src.ctx, StatusMessageTooBig, "read limit")
+			src.close()
+			return ErrMessageTooBig
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (fr *flateReader) close() {
