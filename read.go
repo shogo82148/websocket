@@ -426,8 +426,10 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 	if fr.takeover {
 		fr.dict.write(p[:n])
 	}
-	if errors.Is(err, io.EOF) {
-		fr.close()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			fr.close()
+		}
 		if err := fr.finishMessage(); err != nil {
 			return n, err
 		}
@@ -435,9 +437,10 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// finishMessage is called when the deflate stream ends.
+// finishMessage is called when the deflate stream ends or fails.
 // A DEFLATE block with BFINAL set may end the stream before the end of the message
-// (RFC 7692 Section 7.2.3.4), so the rest of the message is discarded.
+// (RFC 7692 Section 7.2.3.4), and corrupt data stops the stream in the middle of the message,
+// so the rest of the message is discarded.
 // Otherwise the rest is left unread and the read lock is never released.
 func (fr *flateReader) finishMessage() error {
 	src := fr.src

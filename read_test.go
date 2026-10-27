@@ -714,6 +714,29 @@ func TestConnReadEarlyDeflateEnd(t *testing.T) {
 		})
 	}
 
+	t.Run("corrupt data in a fragmented message", func(t *testing.T) {
+		frames := []byte{
+			0x42, 0x01, 0x07, // invalid block type
+			0x80, 0x01, 0x00,
+		}
+		conn := newConnWithFrames(t, slices.Concat(frames, next))
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		var cerr flate.CorruptInputError
+		if _, _, err := conn.Read(ctx); !errors.As(err, &cerr) {
+			t.Fatalf("Read error = %v; want flate.CorruptInputError", err)
+		}
+
+		typ, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if typ != MessageText || string(payload) != "hi" {
+			t.Fatalf("Read = %v, %q; want %v, %q", typ, payload, MessageText, "hi")
+		}
+	})
+
 	t.Run("the discarded data is limited by the read limit", func(t *testing.T) {
 		conn := newConnWithFrames(t, slices.Concat(tests[1].frames, next))
 		// about 900 bytes are left after the 4096 bytes read ahead by the decompressor.
