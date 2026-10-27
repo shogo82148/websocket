@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,6 +30,28 @@ func (r *blockedReadWriteCloser) Write(p []byte) (int, error) {
 
 func (r *blockedReadWriteCloser) Close() error {
 	close(r.closed)
+	return nil
+}
+
+// blockingWriteReadWriteCloser blocks writes until release is closed.
+type blockingWriteReadWriteCloser struct {
+	r       bytes.Buffer
+	once    sync.Once
+	writing chan struct{} // closed when the first write starts
+	release chan struct{}
+}
+
+func (rw *blockingWriteReadWriteCloser) Read(p []byte) (int, error) {
+	return rw.r.Read(p)
+}
+
+func (rw *blockingWriteReadWriteCloser) Write(p []byte) (int, error) {
+	rw.once.Do(func() { close(rw.writing) })
+	<-rw.release
+	return len(p), nil
+}
+
+func (rw *blockingWriteReadWriteCloser) Close() error {
 	return nil
 }
 
@@ -734,6 +757,175 @@ func TestConnReadEarlyDeflateEnd(t *testing.T) {
 		}
 		if typ != MessageText || string(payload) != "hi" {
 			t.Fatalf("Read = %v, %q; want %v, %q", typ, payload, MessageText, "hi")
+		}
+	})
+
+	corruptMessages := []struct {
+		name   string
+		frames []byte
+	}{
+		{"single frame", []byte{0xc2, 0x01, 0x07}},
+		{"fragmented message", []byte{0x42, 0x01, 0x07, 0x80, 0x01, 0x00}},
+	}
+	for _, tt := range corruptMessages {
+		t.Run("context takeover: corrupt data in a "+tt.name+" closes the connection", func(t *testing.T) {
+			conn, rwc := newTestConnWithInput(t, slices.Concat(tt.frames, next))
+			conn.initCompression(new(compressionOptions), 0, flate.BestSpeed)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			_, _, err := conn.Read(ctx)
+			var ce CloseError
+			if !errors.As(err, &ce) || ce.Code != StatusInvalidFramePayloadData {
+				t.Fatalf("Read error = %v; want CloseError with %v", err, StatusInvalidFramePayloadData)
+			}
+			if rwc.closeCount.Load() == 0 {
+				t.Error("the connection is not closed")
+			}
+
+			if _, _, err := conn.Read(ctx); !errors.Is(err, net.ErrClosed) {
+				t.Errorf("Read error = %v; want %v", err, net.ErrClosed)
+			}
+		})
+	}
+
+	t.Run("context takeover: a waiting reader does not read after corrupt data", func(t *testing.T) {
+		frames := []byte{
+			0xc2, 0x01, 0x07, // corrupt data
+			0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, // "Hello"
+		}
+		rwc := &blockingWriteReadWriteCloser{
+			writing: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		rwc.r.Write(frames)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+		conn.initCompression(new(compressionOptions), 0, flate.BestSpeed)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		first := make(chan error, 1)
+		go func() {
+			_, _, err := conn.Read(ctx)
+			first <- err
+		}()
+
+		// the first reader is sending the close frame for the corrupt data.
+		select {
+		case <-rwc.writing:
+		case <-ctx.Done():
+			t.Fatal("the close frame is not written")
+		}
+
+		type result struct {
+			payload []byte
+			err     error
+		}
+		second := make(chan result, 1)
+		go func() {
+			_, payload, err := conn.Read(ctx)
+			second <- result{payload, err}
+		}()
+
+		// wait for the second reader to start reading the next message.
+		time.Sleep(50 * time.Millisecond)
+		close(rwc.release)
+
+		var ce CloseError
+		if err := <-first; !errors.As(err, &ce) || ce.Code != StatusInvalidFramePayloadData {
+			t.Errorf("first Read error = %v; want CloseError with %v", err, StatusInvalidFramePayloadData)
+		}
+		if res := <-second; res.err == nil {
+			t.Errorf("second Read = %q, nil; want an error", res.payload)
+		}
+	})
+
+	// a DEFLATE block with no compression, without BFINAL.
+	stored := []byte{0x00, 0x05, 0x00, 0xfa, 0xff, 'H', 'e', 'l', 'l', 'o'}
+	truncatedMessages := []struct {
+		name   string
+		frames []byte
+	}{
+		{"truncated frame header", slices.Concat([]byte{0x42, 0x0a}, stored, []byte{0x80, 0x7e, 0x00})},
+		{"frame header truncated after the first byte", slices.Concat([]byte{0x42, 0x0a}, stored, []byte{0x80})},
+		{"no continuation frame", slices.Concat([]byte{0x42, 0x0a}, stored)},
+		{"truncated payload", slices.Concat([]byte{0xc2, 0x0a}, stored[:7])},
+	}
+	for _, tt := range truncatedMessages {
+		t.Run("context takeover: "+tt.name+" is not reported as corrupt data", func(t *testing.T) {
+			conn, rwc := newTestConnWithInput(t, tt.frames)
+			conn.initCompression(new(compressionOptions), 0, flate.BestSpeed)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			_, _, err := conn.Read(ctx)
+			if err == nil {
+				t.Fatal("Read succeeded; want an error")
+			}
+			var ce CloseError
+			if errors.As(err, &ce) {
+				t.Errorf("Read error = %v; want an error other than CloseError", err)
+			}
+			if rwc.w.Len() != 0 {
+				t.Errorf("unexpected data is written: %x", rwc.w.Bytes())
+			}
+		})
+	}
+
+	t.Run("a waiting reader reads after another error closes the connection", func(t *testing.T) {
+		frames := []byte{
+			0x82, 0x05, 'a', 'b', 'c', 'd', 'e', // exceeds the read limit
+			0x81, 0x02, 'h', 'i',
+		}
+		rwc := &blockingWriteReadWriteCloser{
+			writing: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		rwc.r.Write(frames)
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+		conn.SetReadLimit(4)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		first := make(chan error, 1)
+		go func() {
+			_, _, err := conn.Read(ctx)
+			first <- err
+		}()
+		select {
+		case <-rwc.writing:
+		case <-ctx.Done():
+			t.Fatal("the close frame is not written")
+		}
+
+		type result struct {
+			payload []byte
+			err     error
+		}
+		second := make(chan result, 1)
+		go func() {
+			_, payload, err := conn.Read(ctx)
+			second <- result{payload, err}
+		}()
+		time.Sleep(50 * time.Millisecond)
+		close(rwc.release)
+
+		if err := <-first; !errors.Is(err, ErrMessageTooBig) {
+			t.Errorf("first Read error = %v; want %v", err, ErrMessageTooBig)
+		}
+		// this is the existing behavior; only a broken sliding window stops the waiting reader.
+		if res := <-second; res.err != nil || string(res.payload) != "hi" {
+			t.Errorf("second Read = %q, %v; want %q, nil", res.payload, res.err, "hi")
 		}
 	})
 
