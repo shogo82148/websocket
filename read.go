@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"compress/flate"
 	"context"
 	"errors"
 	"fmt"
@@ -135,6 +136,17 @@ func (c *Conn) reader(ctx context.Context, skipValidateUTF8 bool) (MessageType, 
 	// Wait for them before resetting.
 	c.readChainMu.Lock()
 	defer c.readChainMu.Unlock()
+
+	// The previous message may have broken the sliding window shared with this message
+	// while we were waiting.
+	if c.flateReader != nil && c.flateReader.broken {
+		c.finishRead()
+		c.readerMu.unlock()
+		if cerr := c.canceledRead(); cerr != nil {
+			return 0, nil, cerr
+		}
+		return 0, nil, net.ErrClosed
+	}
 
 	// retire the previous message's reader.
 	c.readGen++
@@ -398,17 +410,18 @@ func (lr *limitReader) Read(p []byte) (int, error) {
 }
 
 type flateReader struct {
-	src         *messageReader
+	src         flateSource
 	flateReader io.Reader
 	flateTail   strings.Reader
 	dict        slidingWindow
 	takeover    bool
+	broken      bool // the sliding window lacks data that failed to decompress
 }
 
 func (fr *flateReader) reset(src *messageReader, takeover bool) {
-	fr.src = src
+	fr.src = flateSource{r: src}
 	fr.flateTail.Reset(deflateMessageTail)
-	r := io.MultiReader(src, &fr.flateTail)
+	r := io.MultiReader(&fr.src, &fr.flateTail)
 	fr.takeover = takeover
 	if takeover {
 		fr.dict.init(32 * 1024)
@@ -426,8 +439,21 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 	if fr.takeover {
 		fr.dict.write(p[:n])
 	}
-	if errors.Is(err, io.EOF) {
-		fr.close()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			fr.close()
+		} else if fr.takeover && fr.src.err == nil && isDeflateError(err) {
+			// The sliding window lacks the data that failed to decompress,
+			// so the following messages cannot be decompressed correctly.
+			fr.broken = true
+			src := fr.src.r
+			src.conn.abnormalClosure(src.ctx, StatusInvalidFramePayloadData, "invalid compressed data")
+			src.close()
+			return n, CloseError{
+				Code:   StatusInvalidFramePayloadData,
+				Reason: "invalid compressed data",
+			}
+		}
 		if err := fr.finishMessage(); err != nil {
 			return n, err
 		}
@@ -435,12 +461,40 @@ func (fr *flateReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// finishMessage is called when the deflate stream ends.
+// flateSource reads the compressed message and records the error from it,
+// to distinguish the errors of the message from the errors decompressing it.
+type flateSource struct {
+	r   *messageReader
+	err error // the first error other than io.EOF
+}
+
+func (s *flateSource) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if err != nil && s.err == nil {
+		if !errors.Is(err, io.EOF) {
+			s.err = err
+		} else if !s.r.fin || s.r.payloadLen > 0 {
+			// the connection is closed in the middle of the message.
+			s.err = io.ErrUnexpectedEOF
+		}
+	}
+	return n, err
+}
+
+// isDeflateError reports whether err is an error decompressing the DEFLATE stream.
+func isDeflateError(err error) bool {
+	var corrupt flate.CorruptInputError
+	var internal flate.InternalError
+	return errors.As(err, &corrupt) || errors.As(err, &internal) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// finishMessage is called when the deflate stream ends or fails.
 // A DEFLATE block with BFINAL set may end the stream before the end of the message
-// (RFC 7692 Section 7.2.3.4), so the rest of the message is discarded.
+// (RFC 7692 Section 7.2.3.4), and corrupt data stops the stream in the middle of the message,
+// so the rest of the message is discarded.
 // Otherwise the rest is left unread and the read lock is never released.
 func (fr *flateReader) finishMessage() error {
-	src := fr.src
+	src := fr.src.r
 	limit := src.conn.limitReader.limit.Load()
 	var buf [512]byte
 	var discarded int64
