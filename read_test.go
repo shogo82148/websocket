@@ -867,8 +867,7 @@ func TestConnReadEarlyDeflateEnd(t *testing.T) {
 			if err == nil {
 				t.Fatal("Read succeeded; want an error")
 			}
-			var ce CloseError
-			if errors.As(err, &ce) {
+			if _, ok := errors.AsType[CloseError](err); ok {
 				t.Errorf("Read error = %v; want an error other than CloseError", err)
 			}
 			if rwc.w.Len() != 0 {
