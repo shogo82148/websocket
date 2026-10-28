@@ -484,13 +484,9 @@ type flateSource struct {
 
 func (s *flateSource) Read(p []byte) (int, error) {
 	n, err := s.r.Read(p)
-	if err != nil && s.err == nil {
-		if !errors.Is(err, io.EOF) {
-			s.err = err
-		} else if !s.r.fin || s.r.payloadLen > 0 {
-			// the connection is closed in the middle of the message.
-			s.err = io.ErrUnexpectedEOF
-		}
+	// messageReader returns io.EOF only at the end of the message.
+	if err != nil && s.err == nil && !errors.Is(err, io.EOF) {
+		s.err = err
 	}
 	return n, err
 }
