@@ -678,6 +678,119 @@ func TestConnRead(t *testing.T) {
 	}
 }
 
+// eofReadWriteCloser returns the last bytes with io.EOF.
+type eofReadWriteCloser struct {
+	r *bytes.Reader
+}
+
+func (rw *eofReadWriteCloser) Read(p []byte) (int, error) {
+	n, err := rw.r.Read(p)
+	if err == nil && rw.r.Len() == 0 {
+		err = io.EOF
+	}
+	return n, err
+}
+
+func (rw *eofReadWriteCloser) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (rw *eofReadWriteCloser) Close() error {
+	return nil
+}
+
+func TestConnReadTruncatedMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+	}{
+		{"truncated payload", []byte{0x82, 0x05, 'a', 'b'}},
+		{"no continuation frame", []byte{0x02, 0x02, 'a', 'b'}},
+		{"truncated frame header", []byte{0x02, 0x02, 'a', 'b', 0x80}},
+		{"truncated UTF-8 text", []byte{0x81, 0x03, 0xe3, 0x81}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+": Read", func(t *testing.T) {
+			conn, rwc := newTestConnWithInput(t, tt.input)
+			if _, payload, err := conn.Read(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("Read = %q, %v; want %v", payload, err, io.ErrUnexpectedEOF)
+			}
+			if rwc.w.Len() != 0 {
+				t.Errorf("unexpected data is written: %x", rwc.w.Bytes())
+			}
+		})
+
+		t.Run(tt.name+": Reader", func(t *testing.T) {
+			conn, rwc := newTestConnWithInput(t, tt.input)
+			_, r, err := conn.Reader(t.Context())
+			if err != nil {
+				t.Fatalf("Reader failed: %v", err)
+			}
+			if payload, err := io.ReadAll(r); !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("ReadAll = %q, %v; want %v", payload, err, io.ErrUnexpectedEOF)
+			}
+			if rwc.w.Len() != 0 {
+				t.Errorf("unexpected data is written: %x", rwc.w.Bytes())
+			}
+		})
+	}
+
+	t.Run("NetConn", func(t *testing.T) {
+		conn, _ := newTestConnWithInput(t, []byte{0x82, 0x05, 'a', 'b'})
+		nc := NetConn(t.Context(), conn, MessageBinary)
+		if payload, err := io.ReadAll(nc); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("ReadAll = %q, %v; want %v", payload, err, io.ErrUnexpectedEOF)
+		}
+	})
+
+	t.Run("the last bytes with io.EOF", func(t *testing.T) {
+		// e.g. crypto/tls returns the last bytes with io.EOF when close_notify follows them.
+		payload := bytes.Repeat([]byte{'a'}, 10000)
+		input := slices.Concat([]byte{0x82, 0x7e, byte(len(payload) >> 8), byte(len(payload))}, payload)
+		rwc := &eofReadWriteCloser{r: bytes.NewReader(input)}
+		conn := newConn(connConfig{
+			rwc:    rwc,
+			client: true,
+			br:     bufio.NewReader(rwc),
+			bw:     bufio.NewWriter(rwc),
+		})
+		conn.SetReadLimit(-1)
+
+		_, r, err := conn.Reader(t.Context())
+		if err != nil {
+			t.Fatalf("Reader failed: %v", err)
+		}
+		// read with a large buffer, so that bufio.Reader reads directly from rwc.
+		var got []byte
+		buf := make([]byte, 16*1024)
+		for {
+			n, err := r.Read(buf)
+			got = append(got, buf[:n]...)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("Read failed: %v", err)
+			}
+		}
+		if !bytes.Equal(got, payload) {
+			t.Errorf("got %d bytes; want %d bytes", len(got), len(payload))
+		}
+	})
+
+	t.Run("no message", func(t *testing.T) {
+		// io.EOF between messages is the end of the connection, not a truncated message.
+		conn, _ := newTestConnWithInput(t, []byte{0x82, 0x02, 'a', 'b'})
+		if _, _, err := conn.Read(t.Context()); err != nil {
+			t.Fatalf("Read failed: %v", err)
+		}
+		if _, _, err := conn.Read(t.Context()); !errors.Is(err, io.EOF) {
+			t.Errorf("Read error = %v; want %v", err, io.EOF)
+		}
+	})
+}
+
 func TestConnReadEarlyDeflateEnd(t *testing.T) {
 	// an empty DEFLATE block with BFINAL set to 1, followed by data.
 	finalBlock := []byte{0x03, 0x00}

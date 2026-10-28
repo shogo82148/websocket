@@ -59,7 +59,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			if cerr := r.conn.canceledRead(); cerr != nil {
 				return 0, cerr
 			}
-			return 0, err
+			return 0, unexpectedEOF(err)
 		}
 		r.setHeader(h)
 		r.payloadLen = h.payloadLen
@@ -78,7 +78,11 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		if cerr := r.conn.canceledRead(); cerr != nil {
 			return 0, cerr
 		}
-		return n, err
+		if errors.Is(err, io.EOF) && r.payloadLen == 0 && r.fin {
+			// the last bytes of the message are returned with io.EOF.
+			return n, io.EOF
+		}
+		return n, unexpectedEOF(err)
 	}
 
 	if r.payloadLen == 0 && r.fin {
@@ -86,6 +90,16 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		return n, io.EOF
 	}
 	return n, nil
+}
+
+// unexpectedEOF converts io.EOF to io.ErrUnexpectedEOF.
+// The connection is closed in the middle of the message,
+// so io.EOF must not be returned as the end of the message.
+func unexpectedEOF(err error) error {
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 func (r *messageReader) close() error {
