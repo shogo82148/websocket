@@ -18,8 +18,10 @@ The API is compatible with <https://github.com/coder/websocket>.
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/shogo82148/websocket"
 )
