@@ -431,6 +431,52 @@ func TestAccept(t *testing.T) {
 		}
 	})
 
+	t.Run("same origin requires OriginPatterns", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name   string
+			opts   *AcceptOptions
+			status int
+		}{
+			{"no patterns", nil, http.StatusForbidden},
+			{"with patterns", &AcceptOptions{OriginPatterns: []string{"http://example.com"}}, http.StatusSwitchingProtocols},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					conn, err := Accept(w, r, tc.opts)
+					if err != nil {
+						return
+					}
+					conn.CloseNow()
+				}))
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+				if err != nil {
+					t.Fatalf("http.NewRequestWithContext failed: %v", err)
+				}
+				h := req.Header
+				h.Set("Upgrade", "websocket")
+				h.Set("Connection", "Upgrade")
+				h.Set("Origin", "http://example.com")
+				h.Set("Sec-Websocket-Version", "13")
+				h.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // betterleaks:allow
+
+				resp, err := ts.Client().Do(req)
+				if err != nil {
+					t.Fatalf("http.Client.Do failed: %v", err)
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != tc.status {
+					t.Errorf("unexpected status code: got %d, want %d", resp.StatusCode, tc.status)
+				}
+			})
+		}
+	})
+
 	t.Run("origin mismatch", func(t *testing.T) {
 		t.Parallel()
 
@@ -536,16 +582,31 @@ func TestValidateOrigin(t *testing.T) {
 			success: false,
 		},
 		{
-			name:    "host match",
+			name:    "same origin is not authorized implicitly",
 			origin:  "http://example.com",
 			host:    "example.com",
-			success: true,
+			success: false,
 		},
 		{
-			name:    "host is case-insensitive",
-			origin:  "https://examplE.com",
-			host:    "example.com",
-			success: true,
+			name:     "same origin in patterns",
+			origin:   "http://example.com",
+			host:     "example.com",
+			patterns: []string{"http://example.com"},
+			success:  true,
+		},
+		{
+			name:     "origin is case-insensitive",
+			origin:   "https://examplE.com",
+			host:     "example.com",
+			patterns: []string{"https://example.com"},
+			success:  true,
+		},
+		{
+			name:     "the request host is not used",
+			origin:   "https://example.com",
+			host:     "example.org",
+			patterns: []string{"https://example.com"},
+			success:  true,
 		},
 		{
 			name:   "origin patterns",

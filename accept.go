@@ -23,13 +23,20 @@ type AcceptOptions struct {
 	// InsecureSkipVerify is used to disable Accept's origin verification behavior.
 	InsecureSkipVerify bool
 
-	// OriginPatterns lists the host patterns for authorized origins.
-	// The request host is always authorized.
-	// Use this to enable cross origin WebSockets.
+	// OriginPatterns lists the patterns for authorized origins.
+	// Requests with an Origin header are rejected unless the origin matches one of the patterns.
+	// Requests without an Origin header (i.e. not from a browser) are always authorized.
+	//
+	// The origin of the server itself is not authorized implicitly,
+	// because Accept cannot know the scheme and port the client used (e.g. behind a reverse proxy).
+	// List it explicitly to accept same-origin WebSockets.
 	//
 	// i.e JavaScript running on https://example.com wants to access a WebSocket server at https://chat.example.com.
 	// In such a case, https://example.com is the origin and https://chat.example.com is the request host.
 	// One would set this field to []string{"https://example.com"} to authorize https://example.com to connect.
+	//
+	// The scheme and port of the origin must match the pattern.
+	// The port defaults to 80 for http and 443 for https.
 	//
 	// The wildcard pattern (*) matches a single arbitrary subdomain.
 	// For example, https://*.example.com matches https://foo.example.com,
@@ -443,10 +450,8 @@ func validateOrigin(req *http.Request, allowed []string) error {
 		return fmt.Errorf("websocket: failed to parse origin: %w", err)
 	}
 
-	if strings.EqualFold(o.host, req.Host) {
-		return nil
-	}
-
+	// The origin of the server is not inferred from the request (e.g. the Host header),
+	// because behind a reverse proxy the server cannot know the scheme and port the client used.
 	for _, a := range allowed {
 		parsedAllowed, err := parseOrigin(a)
 		if err != nil {

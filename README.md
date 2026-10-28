@@ -26,7 +26,11 @@ import (
 
 func main() {
   http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-    conn, err := websocket.Accept(w, r, nil)
+    conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+      // List the origins of the pages allowed to connect from browsers,
+      // including the origin of this server itself.
+      OriginPatterns: []string{"http://localhost:8080"},
+    })
     if err != nil {
       return
     }
